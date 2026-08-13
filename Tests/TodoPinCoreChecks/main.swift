@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import TodoPinCore
+import TodoPinMCP
 
 struct CheckFailure: Error, CustomStringConvertible {
     let message: String
@@ -38,6 +39,14 @@ let checks: [Check] = [
     ("TodoStore.load reflects external file changes", checkLoadReflectsExternalChange),
     ("TodoStore.load skips publish when content unchanged", checkLoadSkipsPublishWhenUnchanged),
     ("TodoStore.load clears items when file missing", checkLoadClearsItemsWhenFileMissing),
+    ("MCP JSONValue and MCPID codec round-trips", checkMCPCodecRoundTrips),
+    ("MCP parse error maps to -32700 with null id", checkMCPParseError),
+    ("MCP unknown method maps to -32601", checkMCPUnknownMethod),
+    ("MCP initialize handshake and ping", checkMCPInitializeHandshake),
+    ("MCP tools/list declares six tools with schemas", checkMCPToolsList),
+    ("MCP tool lifecycle create list complete uncomplete update delete", checkMCPToolLifecycle),
+    ("MCP tool errors use isError and -32602 layering", checkMCPToolErrors),
+    ("MCP reads fresh store on every call", checkMCPFreshStore),
     ("ReminderPolicy does not remind with no open items", checkDoesNotRemindWhenThereAreNoOpenItems),
     ("ReminderPolicy does not immediately remind for new todo", checkDoesNotImmediatelyRemindForNewTodo),
     ("ReminderPolicy reminds after one hour", checkRemindsAfterTodoHasBeenOpenForOneHour),
@@ -419,6 +428,335 @@ func checkLoadClearsItemsWhenFileMissing() throws {
 
     try store.load()
     try check(store.items.isEmpty, "load should clear items when file missing")
+}
+
+func makeMCPServer(in temporaryDirectory: URL) -> MCPServer {
+    MCPServer(storeURL: temporaryDirectory.appendingPathComponent("todos.json"))
+}
+
+func decodeResponse<T: Decodable>(_ data: Data, as type: T.Type) throws -> T {
+    var stripped = data
+    if stripped.last == 0x0A {
+        stripped = stripped.dropLast()
+    }
+    return try JSONDecoder().decode(type, from: stripped)
+}
+
+func mcpToolsCall(id: Int, name: String, arguments: String) -> Data {
+    let body = "{\"jsonrpc\":\"2.0\",\"id\":\(id),\"method\":\"tools/call\",\"params\":{\"name\":\"\(name)\",\"arguments\":\(arguments)}}"
+    return Data(body.utf8)
+}
+
+func toolResultPayload(_ data: Data) throws -> JSONValue {
+    let response = try decodeResponse(data, as: MCPSuccessResponse.self)
+    guard case .object(let result) = response.result,
+          case .array(let content)? = result["content"],
+          case .object(let first)? = content.first,
+          case .string(let text)? = first["text"] else {
+        throw CheckFailure(message: "工具结果格式错误")
+    }
+    return try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
+}
+
+func toolResultIsError(_ data: Data) throws -> Bool {
+    let response = try decodeResponse(data, as: MCPSuccessResponse.self)
+    guard case .object(let result) = response.result else {
+        throw CheckFailure(message: "工具结果格式错误")
+    }
+    return result["isError"] == .bool(true)
+}
+
+func payloadBool(_ payload: JSONValue, _ key: String) throws -> Bool {
+    guard case .object(let object) = payload,
+          case .bool(let value)? = object[key] else {
+        throw CheckFailure(message: "负载缺少布尔字段 \(key)")
+    }
+    return value
+}
+
+func payloadString(_ payload: JSONValue, _ key: String) throws -> String {
+    guard case .object(let object) = payload,
+          case .string(let value)? = object[key] else {
+        throw CheckFailure(message: "负载缺少字段 \(key)")
+    }
+    return value
+}
+
+func payloadID(_ payload: JSONValue) throws -> String {
+    try payloadString(payload, "id")
+}
+
+func checkMCPCodecRoundTrips() throws {
+    let value = try JSONDecoder().decode(
+        JSONValue.self,
+        from: Data(#"{"a":1,"b":[true,null,"x"]}"#.utf8)
+    )
+    try check(
+        value == .object(["a": .int(1), "b": .array([.bool(true), .null, .string("x")])]),
+        "JSONValue 解码错误"
+    )
+
+    let reencoded = try JSONEncoder().encode(value)
+    let decodedAgain = try JSONDecoder().decode(JSONValue.self, from: reencoded)
+    try check(decodedAgain == value, "JSONValue 编码往返应一致")
+
+    let intID = try JSONDecoder().decode(MCPID.self, from: Data("1".utf8))
+    try check(intID == .int(1), "整数 id 应解析为 int")
+    let stringID = try JSONDecoder().decode(MCPID.self, from: Data(#""abc""#.utf8))
+    try check(stringID == .string("abc"), "字符串 id 应解析为 string")
+}
+
+func checkMCPParseError() throws {
+    let server = MCPServer(storeURL: URL(fileURLWithPath: "/tmp/unused-todos.json"))
+    let response = try require(server.process(frame: Data("不是JSON".utf8)), "解析错误应有响应")
+    let decoded = try decodeResponse(response, as: MCPErrorResponse.self)
+    try check(decoded.error.code == -32700, "非法消息应返回 -32700")
+    try check(decoded.id == nil, "解析错误的 id 应为 null")
+}
+
+func checkMCPUnknownMethod() throws {
+    let server = MCPServer(storeURL: URL(fileURLWithPath: "/tmp/unused-todos.json"))
+    let response = try require(
+        server.process(frame: Data(#"{"jsonrpc":"2.0","id":7,"method":"nope"}"#.utf8)),
+        "未知方法应有响应"
+    )
+    let decoded = try decodeResponse(response, as: MCPErrorResponse.self)
+    try check(decoded.error.code == -32601, "未知方法应返回 -32601")
+    try check(decoded.id == .int(7), "错误响应的 id 应原样返回")
+}
+
+func checkMCPInitializeHandshake() throws {
+    let server = MCPServer(storeURL: URL(fileURLWithPath: "/tmp/unused-todos.json"))
+
+    let initResponse = try require(
+        server.process(frame: Data(#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#.utf8)),
+        "initialize 应有响应"
+    )
+    let initDecoded = try decodeResponse(initResponse, as: MCPSuccessResponse.self)
+    try check(initDecoded.id == .int(1), "initialize 响应 id 应原样返回")
+    guard case .object(let result) = initDecoded.result else {
+        throw CheckFailure(message: "initialize 结果应为对象")
+    }
+    try check(result["protocolVersion"] == .string("2025-06-18"), "协议版本应为 2025-06-18")
+    guard case .object(let serverInfo)? = result["serverInfo"],
+          serverInfo["name"] == .string("todopin") else {
+        throw CheckFailure(message: "serverInfo 缺失或 name 错误")
+    }
+
+    let pingResponse = try require(
+        server.process(frame: Data(#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#.utf8)),
+        "ping 应有响应"
+    )
+    let pingDecoded = try decodeResponse(pingResponse, as: MCPSuccessResponse.self)
+    try check(pingDecoded.result == .object([:]), "ping 应返回空对象")
+}
+
+func checkMCPToolsList() throws {
+    let server = MCPServer(storeURL: URL(fileURLWithPath: "/tmp/unused-todos.json"))
+    let response = try require(
+        server.process(frame: Data(#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#.utf8)),
+        "tools/list 应有响应"
+    )
+    let decoded = try decodeResponse(response, as: MCPSuccessResponse.self)
+    guard case .object(let result) = decoded.result,
+          case .array(let tools)? = result["tools"] else {
+        throw CheckFailure(message: "tools/list 结果格式错误")
+    }
+
+    let expectedNames: Set<String> = [
+        "list_tasks", "create_task", "update_task",
+        "complete_task", "uncomplete_task", "delete_task"
+    ]
+    var names: Set<String> = []
+    for tool in tools {
+        guard case .object(let object) = tool,
+              case .string(let name)? = object["name"],
+              case .object(let schema)? = object["inputSchema"],
+              case .string(let schemaType)? = schema["type"] else {
+            throw CheckFailure(message: "工具声明格式错误")
+        }
+        names.insert(name)
+        try check(schemaType == "object", "inputSchema 应声明 type=object")
+    }
+    try check(names == expectedNames, "tools/list 应返回六个预期工具")
+}
+
+func checkMCPToolLifecycle() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let server = makeMCPServer(in: temporaryDirectory)
+
+    let createResponse = try require(
+        server.process(frame: mcpToolsCall(
+            id: 1,
+            name: "create_task",
+            arguments: #"{"title":"MCP 测试任务","reminder_at":"2026-08-14T09:00:00+08:00"}"#
+        )),
+        "create_task 应有响应"
+    )
+    let created = try toolResultPayload(createResponse)
+    let createdTitle = try payloadString(created, "title")
+    try check(createdTitle == "MCP 测试任务", "create_task 标题错误")
+    let createdReminder = try payloadString(created, "reminderAt")
+    try check(createdReminder.hasPrefix("2026-08-14"), "create_task 提醒时间错误")
+    let id = try payloadID(created)
+
+    let listResponse = try require(
+        server.process(frame: mcpToolsCall(id: 2, name: "list_tasks", arguments: "{}")),
+        "list_tasks 应有响应"
+    )
+    let listed = try toolResultPayload(listResponse)
+    guard case .array(let items) = listed else {
+        throw CheckFailure(message: "list_tasks 应返回数组")
+    }
+    try check(items.count == 1, "list_tasks 应包含 1 条任务")
+
+    let completeResponse = try require(
+        server.process(frame: mcpToolsCall(id: 3, name: "complete_task", arguments: #"{"id":""# + id + #""}"#)),
+        "complete_task 应有响应"
+    )
+    let completed = try toolResultPayload(completeResponse)
+    let completedFlag = try payloadBool(completed, "isCompleted")
+    try check(completedFlag, "complete_task 后应已完成")
+
+    let listAfterComplete = try toolResultPayload(try require(
+        server.process(frame: mcpToolsCall(id: 4, name: "list_tasks", arguments: "{}")),
+        "list_tasks 应有响应"
+    ))
+    guard case .array(let openItems) = listAfterComplete else {
+        throw CheckFailure(message: "list_tasks 应返回数组")
+    }
+    try check(openItems.isEmpty, "完成后的默认 list_tasks 应为空")
+
+    let uncompleteResponse = try require(
+        server.process(frame: mcpToolsCall(id: 5, name: "uncomplete_task", arguments: #"{"id":""# + id + #""}"#)),
+        "uncomplete_task 应有响应"
+    )
+    let uncompletedPayload = try toolResultPayload(uncompleteResponse)
+    let uncompletedFlag = try payloadBool(uncompletedPayload, "isCompleted")
+    try check(!uncompletedFlag, "uncomplete_task 后应未完成")
+
+    let updateResponse = try require(
+        server.process(frame: mcpToolsCall(
+            id: 6,
+            name: "update_task",
+            arguments: #"{"id":""# + id + #"","title":"改过的标题"}"#
+        )),
+        "update_task 应有响应"
+    )
+    let updated = try toolResultPayload(updateResponse)
+    let updatedTitle = try payloadString(updated, "title")
+    try check(updatedTitle == "改过的标题", "update_task 标题错误")
+    let updatedReminder = try payloadString(updated, "reminderAt")
+    try check(updatedReminder.hasPrefix("2026-08-14"), "只改标题时提醒时间应保留")
+
+    let clearResponse = try require(
+        server.process(frame: mcpToolsCall(
+            id: 7,
+            name: "update_task",
+            arguments: #"{"id":""# + id + #"","clear_reminder":true}"#
+        )),
+        "update_task 应有响应"
+    )
+    let cleared = try toolResultPayload(clearResponse)
+    guard case .object(let clearedObject) = cleared,
+          clearedObject["reminderAt"] == .null else {
+        throw CheckFailure(message: "clear_reminder 后提醒时间应为 null")
+    }
+
+    let deleteResponse = try require(
+        server.process(frame: mcpToolsCall(id: 8, name: "delete_task", arguments: #"{"id":""# + id + #""}"#)),
+        "delete_task 应有响应"
+    )
+    let deleted = try toolResultPayload(deleteResponse)
+    let deletedID = try payloadString(deleted, "id")
+    try check(deletedID == id, "delete_task 返回的 id 应一致")
+
+    let finalList = try toolResultPayload(try require(
+        server.process(frame: mcpToolsCall(id: 9, name: "list_tasks", arguments: "{}")),
+        "list_tasks 应有响应"
+    ))
+    guard case .array(let finalItems) = finalList else {
+        throw CheckFailure(message: "list_tasks 应返回数组")
+    }
+    try check(finalItems.isEmpty, "删除后 list_tasks 应为空")
+}
+
+func checkMCPToolErrors() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let server = makeMCPServer(in: temporaryDirectory)
+
+    let badDateResponse = try require(
+        server.process(frame: mcpToolsCall(
+            id: 1,
+            name: "create_task",
+            arguments: #"{"title":"x","reminder_at":"not-a-date"}"#
+        )),
+        "非法日期应有响应"
+    )
+    let badDateIsError = try toolResultIsError(badDateResponse)
+    try check(badDateIsError, "非法日期应返回 isError")
+
+    let missingIDResponse = try require(
+        server.process(frame: mcpToolsCall(
+            id: 2,
+            name: "complete_task",
+            arguments: #"{"id":"00000000-0000-0000-0000-000000000000"}"#
+        )),
+        "id 不存在应有响应"
+    )
+    let missingIDIsError = try toolResultIsError(missingIDResponse)
+    try check(missingIDIsError, "id 不存在应返回 isError")
+
+    let noParamResponse = try require(
+        server.process(frame: mcpToolsCall(
+            id: 3,
+            name: "update_task",
+            arguments: #"{"id":"00000000-0000-0000-0000-000000000000"}"#
+        )),
+        "无修改参数应有响应"
+    )
+    let noParamIsError = try toolResultIsError(noParamResponse)
+    try check(noParamIsError, "update_task 无参数应返回 isError")
+
+    let unknownToolResponse = try require(
+        server.process(frame: mcpToolsCall(id: 4, name: "nope", arguments: "{}")),
+        "未知工具应有响应"
+    )
+    let unknownDecoded = try decodeResponse(unknownToolResponse, as: MCPErrorResponse.self)
+    try check(unknownDecoded.error.code == -32602, "未知工具应返回 -32602")
+
+    let badParamsResponse = try require(
+        server.process(frame: Data(#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":[1,2]}"#.utf8)),
+        "非法 params 应有响应"
+    )
+    let badParamsDecoded = try decodeResponse(badParamsResponse, as: MCPErrorResponse.self)
+    try check(badParamsDecoded.error.code == -32602, "params 非对象应返回 -32602")
+}
+
+func checkMCPFreshStore() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let server = makeMCPServer(in: temporaryDirectory)
+
+    _ = try toolResultPayload(try require(
+        server.process(frame: mcpToolsCall(id: 1, name: "create_task", arguments: #"{"title":"第一条"}"#)),
+        "create_task 应有响应"
+    ))
+
+    let externalStore = makeStore(in: temporaryDirectory)
+    try externalStore.load()
+    _ = try require(try externalStore.add(title: "外部写入", source: .text), "外部写入失败")
+
+    let listResponse = try require(
+        server.process(frame: mcpToolsCall(id: 2, name: "list_tasks", arguments: "{}")),
+        "list_tasks 应有响应"
+    )
+    guard case .array(let items) = try toolResultPayload(listResponse) else {
+        throw CheckFailure(message: "list_tasks 应返回数组")
+    }
+    try check(items.count == 2, "外部写入后 list_tasks 应读到最新数据（2 条）")
 }
 
 func makeStore(in temporaryDirectory: URL) -> TodoStore {

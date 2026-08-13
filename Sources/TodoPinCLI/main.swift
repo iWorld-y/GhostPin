@@ -1,5 +1,6 @@
 import Foundation
 import TodoPinCore
+import TodoPinMCP
 
 private let isoFormatter = ISO8601DateFormatter()
 
@@ -65,6 +66,8 @@ private func run(_ arguments: [String]) throws {
         try runUpdate(Array(arguments.dropFirst()))
     case "delete":
         try runDelete(Array(arguments.dropFirst()))
+    case "mcp":
+        runMCPServer()
     default:
         throw CLIError(message: "未知命令: \(command)\n\n\(usageText)", code: .usageError)
     }
@@ -76,7 +79,7 @@ private func runList(_ arguments: [String]) throws {
     let items = parsed.flags.contains("--all") ? store.items : store.openItems()
 
     if jsonRequested {
-        try printJSON(items.map(CLITodoItem.init))
+        try printJSON(items.map(TodoItemPayload.init))
     } else {
         for item in items {
             print("\(item.id.uuidString)\t\(item.isCompleted ? "done" : "open")\t\(item.title)")
@@ -254,7 +257,7 @@ private func parseReminder(_ raw: String) throws -> Date {
 
 private func successOutput(_ item: TodoItem) throws {
     if jsonRequested {
-        try printJSON(CLISuccessResponse(item: CLITodoItem(item)))
+        try printJSON(CLISuccessResponse(item: TodoItemPayload(item)))
     } else {
         print(item.id.uuidString)
     }
@@ -262,6 +265,16 @@ private func successOutput(_ item: TodoItem) throws {
 
 private func printJSON<T: Encodable>(_ value: T) throws {
     print(try jsonString(value))
+}
+
+private func runMCPServer() {
+    do {
+        let server = MCPServer(storeURL: try StorageLocations.todosURL())
+        server.run()
+    } catch {
+        FileHandle.standardError.write(Data(("MCP 启动失败: \(error.localizedDescription)\n").utf8))
+        exit(ExitCode.runtimeError.rawValue)
+    }
 }
 
 private let usageText = """
@@ -276,6 +289,7 @@ todopin-cli - TodoPin 命令行工具
   update <id> [--title <标题>] [--reminder <ISO8601>] [--clear-reminder]
                                 修改任务（至少指定一项）
   delete <id>                   删除任务
+  mcp                           以 MCP stdio 服务器模式运行（供 OpenCode 等 Agent 调用）
 
 选项:
   --json                        以 JSON 输出结果
