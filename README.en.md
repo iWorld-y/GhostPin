@@ -6,19 +6,36 @@
 
 **English** · [中文](README.md)
 
-TodoPin is a local-first macOS menu bar todo app for quickly capturing tasks with text. It shows a ghost HUD on the desktop with click-through by default, parses reminder times from todo text, and reminds you until a task is completed. Tasks can also be managed programmatically via the `todopin-cli` command line tool or an MCP server.
+TodoPin is an **Agent-native**, local-first macOS menu bar todo app (SwiftUI + Swift Package Manager): task creation, updates, and deletions are done exclusively through MCP by agents, while the app itself only displays tasks (a desktop ghost HUD) and sends local notifications. Todos are stored on your Mac as JSON files. Requires macOS 14+, built with Swift 6.
 
-The app is designed for private, single-user, local workflows. Todos are stored on your Mac as JSON files.
+## Design Philosophy: Agent Native
+
+TodoPin is a **task panel for agents**. All write operations converge on the MCP server; the app is a pure display shell.
+
+```
+Agent (OpenCode / Codex / you) ──create/update/complete──▶  MCP Server
+                                                              │ read/write
+                                                              ▼
+                                                        todos.json
+                                                              │ file watching (sub-second)
+                                              ┌───────────────┼──────────────┐
+                                         ┌────▼────┐    ┌─────▼────┐   ┌─────▼────┐
+                                         │ Ghost HUD │    │ Notifications│  │ Menu Bar  │
+                                         │ (display) │    │ (timed)   │   │ (toggle/quit)│
+                                         └─────────┘    └──────────┘   └──────────┘
+```
+
+- **Writes only through MCP**: the sole UI write action is "complete" on the HUD. Adding, editing, deleting, and changing priority/due date/description all go through MCP tools.
+- **Agents parse natural language**: reminder times and similar natural-language expressions are resolved by the agent (LLM) and passed as ISO8601; the app does no time parsing.
+- **No global shortcuts**: the app registers no global hotkeys (avoids conflicts with other software); pass-through/interactive mode is toggled from the menu bar.
+- **Live refresh via file watching**: after an agent modifies data via MCP/CLI, the HUD refreshes within seconds.
 
 ## Features
 
-- Menu bar todo panel for quick capture and task management.
-- Desktop ghost HUD: borderless, always on top, adjustable opacity, mouse click-through by default; press `⌥⌘T` to toggle pass-through/interactive mode. Window position, size, opacity, mode, and display scope persist across restarts.
-- Text quick-add with Chinese reminder time parsing (e.g. "tomorrow 9am").
-- Editable todo title and reminder time.
-- Completion, deletion, and hourly reminder behavior for unfinished items.
-- Local macOS notifications.
-- Launch at login option.
+- Desktop ghost HUD: borderless, always on top, adjustable opacity, mouse click-through by default; pass-through/interactive mode is toggled via the menu bar "Interactive mode" switch. Window position, size, opacity, mode, and display scope persist across restarts.
+- Read-only HUD display: title, priority, due date, description, overdue strikethrough; the only interaction is marking tasks complete.
+- Menu bar tray: open-task count badge, show/hide the desktop note, interactive-mode switch, settings, quit.
+- Local macOS notifications for timed reminders; launch-at-login option.
 - `todopin-cli` command line tool (list / add / done / undone / update / delete, `--json` output) for scripts and agents.
 - MCP Server (`todopin-cli mcp`) so OpenCode, Codex, and other agents can manage TodoPin directly.
 - No account system, no cloud sync, and no analytics.
@@ -37,13 +54,6 @@ TodoPin is local-first by design.
 Download the latest `TodoPin.dmg` from the GitHub Releases page, open it, and drag `TodoPin.app` into Applications.
 
 The current public build is ad-hoc signed. macOS Gatekeeper may show an unidentified developer warning. For a production distribution, build with a Developer ID certificate and notarize the DMG.
-
-## Default Shortcuts
-
-- Text quick-add: `Option + Space`
-- HUD pass-through / interactive toggle: `Option + Command + T`
-
-Shortcuts can be changed in Settings. Text quick-add opens a compact input panel.
 
 ## Command Line Tool
 

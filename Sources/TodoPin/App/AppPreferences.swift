@@ -18,14 +18,6 @@ struct HudWindowFrame: Codable, Equatable {
 }
 
 final class AppPreferences: ObservableObject {
-    @Published var textHotKeyShortcut: HotKeyShortcut {
-        didSet { saveTextHotKeyShortcut() }
-    }
-
-    @Published var reminderSettings: ReminderSettings {
-        didSet { saveReminderSettings() }
-    }
-
     @Published var keepBoardOnTop: Bool {
         didSet { defaults.set(keepBoardOnTop, forKey: Keys.keepBoardOnTop) }
     }
@@ -58,30 +50,10 @@ final class AppPreferences: ObservableObject {
         didSet { saveHudFrame() }
     }
 
-    @Published var hudModeHotKeyShortcut: HotKeyShortcut {
-        didSet { saveHudModeHotKeyShortcut() }
-    }
-
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-
-        let loadedTextHotKeyShortcut: HotKeyShortcut
-        if let data = defaults.data(forKey: Keys.textHotKeyShortcut),
-           let decoded = try? JSONDecoder.todoPin.decode(HotKeyShortcut.self, from: data) {
-            loadedTextHotKeyShortcut = decoded
-        } else if let data = defaults.data(forKey: Keys.hotKeyShortcut),
-                  let decoded = try? JSONDecoder.todoPin.decode(HotKeyShortcut.self, from: data) {
-            loadedTextHotKeyShortcut = decoded
-        } else if let legacyRawValue = defaults.string(forKey: Keys.hotKeyPreset),
-                  let legacyShortcut = HotKeyShortcut.legacyPreset(rawValue: legacyRawValue) {
-            loadedTextHotKeyShortcut = legacyShortcut
-        } else {
-            loadedTextHotKeyShortcut = .defaultTextShortcut
-        }
-
-        self.textHotKeyShortcut = loadedTextHotKeyShortcut
 
         self.keepBoardOnTop = defaults.object(forKey: Keys.keepBoardOnTop) == nil ? true : defaults.bool(forKey: Keys.keepBoardOnTop)
         self.launchAtLogin = defaults.bool(forKey: Keys.launchAtLogin)
@@ -98,44 +70,6 @@ final class AppPreferences: ObservableObject {
         } else {
             self.hudFrame = nil
         }
-
-        let hudModeFallback: HotKeyShortcut
-        if HotKeyShortcut.optionCommandT != loadedTextHotKeyShortcut {
-            hudModeFallback = .optionCommandT
-        } else {
-            hudModeFallback = HotKeyShortcut.presets.first {
-                $0 != loadedTextHotKeyShortcut
-            } ?? .optionCommandT
-        }
-
-        if let data = defaults.data(forKey: Keys.hudModeHotKeyShortcut),
-           let decoded = try? JSONDecoder.todoPin.decode(HotKeyShortcut.self, from: data),
-           decoded != loadedTextHotKeyShortcut {
-            self.hudModeHotKeyShortcut = decoded
-        } else {
-            self.hudModeHotKeyShortcut = hudModeFallback
-        }
-
-        if let data = defaults.data(forKey: Keys.reminderSettings),
-           let decoded = try? JSONDecoder.todoPin.decode(ReminderSettings.self, from: data) {
-            self.reminderSettings = decoded
-        } else {
-            self.reminderSettings = ReminderSettings()
-        }
-    }
-
-    private func saveTextHotKeyShortcut() {
-        guard let data = try? JSONEncoder.todoPin.encode(textHotKeyShortcut) else {
-            return
-        }
-        defaults.set(data, forKey: Keys.textHotKeyShortcut)
-    }
-
-    private func saveReminderSettings() {
-        guard let data = try? JSONEncoder.todoPin.encode(reminderSettings) else {
-            return
-        }
-        defaults.set(data, forKey: Keys.reminderSettings)
     }
 
     private func saveHudMode() {
@@ -144,13 +78,6 @@ final class AppPreferences: ObservableObject {
 
     private func saveHudScope() {
         defaults.set(hudScope.rawValue, forKey: Keys.hudScope)
-    }
-
-    private func saveHudModeHotKeyShortcut() {
-        guard let data = try? JSONEncoder.todoPin.encode(hudModeHotKeyShortcut) else {
-            return
-        }
-        defaults.set(data, forKey: Keys.hudModeHotKeyShortcut)
     }
 
     private func saveHudFrame() {
@@ -163,10 +90,6 @@ final class AppPreferences: ObservableObject {
     }
 
     private enum Keys {
-        static let textHotKeyShortcut = "textHotKeyShortcut"
-        static let hotKeyShortcut = "hotKeyShortcut"
-        static let hotKeyPreset = "hotKeyPreset"
-        static let reminderSettings = "reminderSettings"
         static let keepBoardOnTop = "keepBoardOnTop"
         static let launchAtLogin = "launchAtLogin"
         static let hudMode = "hudMode"
@@ -175,6 +98,5 @@ final class AppPreferences: ObservableObject {
         static let hudMaxItems = "hudMaxItems"
         static let hudAllSpaces = "hudAllSpaces"
         static let hudFrame = "hudFrame"
-        static let hudModeHotKeyShortcut = "hudModeHotKeyShortcut"
     }
 }

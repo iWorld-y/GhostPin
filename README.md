@@ -6,15 +6,36 @@
 
 **中文** · [English](README.en.md)
 
-TodoPin 是一个本地优先的 macOS 菜单栏待办应用（SwiftUI + Swift Package Manager），支持文本快速录入、桌面幽灵 HUD 与本地通知。纯本地存储，无云同步。最低支持 macOS 14，工具链为 Swift 6（包声明 `swiftLanguageModes: [.v5]`）。
+TodoPin 是一个**Agent native** 的本地优先 macOS 菜单栏待办应用（SwiftUI + Swift Package Manager）：任务的新增、修改、删除一律通过 MCP 由 Agent 完成，应用本身只负责展示（桌面幽灵 HUD）与本地通知。纯本地存储，无云同步。最低支持 macOS 14，工具链为 Swift 6（包声明 `swiftLanguageModes: [.v5]`）。
+
+## 设计理念：Agent Native
+
+TodoPin 的定位是**「Agent 的任务面板」**：操作入口全部收敛到 MCP Server，App 退化为纯展示壳。
+
+```
+Agent (OpenCode / Codex / 你) ──create/update/complete──▶  MCP Server
+                                                              │ 读写
+                                                              ▼
+                                                        todos.json
+                                                              │ 文件监听(秒级)
+                                              ┌───────────────┼──────────────┐
+                                         ┌────▼────┐    ┌─────▼────┐   ┌─────▼────┐
+                                         │ 幽灵 HUD │    │ 本地通知  │   │ 菜单栏托盘 │
+                                         │  (展示)  │    │(定时提醒) │   │(开关/退出)│
+                                         └─────────┘    └──────────┘   └──────────┘
+```
+
+- **写操作只走 MCP**：UI 上唯一的写入口是 HUD 上的「勾选完成」；新增、编辑、删除、改优先级/截止/描述全部通过 MCP 工具完成。
+- **Agent 解析自然语言**：提醒时间等自然语言表达由 Agent（LLM）解析后以 ISO8601 传入，应用不做时间解析。
+- **无全局快捷键**：不注册任何全局快捷键（避免与其他软件冲突），HUD 的穿透/交互切换由托盘开关控制。
+- **文件监听实时刷新**：Agent 通过 MCP/CLI 修改后，HUD 秒级反映，无需重启。
 
 ## 功能
 
-- 菜单栏待办面板，快速捕捉与管理任务。
-- 桌面幽灵 HUD：无边框、始终置顶、透明度可调，默认鼠标点击穿透不打扰工作，按 `⌥⌘T` 在穿透/交互模式间切换；窗口位置、尺寸、透明度、模式与显示范围重启后自动恢复。
-- 文本快速录入，自动解析中文提醒时间（如"明天 9 点"）。
-- 编辑标题与提醒时间、完成、删除；未完成任务每小时提醒，直到完成。
-- 本地 macOS 通知；支持登录时启动。
+- 桌面幽灵 HUD：无边框、始终置顶、透明度可调，默认鼠标点击穿透不打扰工作；穿透/交互模式由托盘「交互模式」开关切换；窗口位置、尺寸、透明度、模式与显示范围重启后自动恢复。
+- HUD 只读展示：标题、优先级、截止时间、描述、过期删除线；唯一交互是勾选完成。
+- 菜单栏托盘：未完成数量徽标、显示/隐藏桌面便签、交互模式开关、设置、退出。
+- 本地 macOS 通知：任务提醒时间到点通知；支持登录时启动。
 - `todopin-cli` 命令行工具（list / add / done / undone / update / delete，`--json` 输出），供脚本与 Agent 调用。
 - MCP Server（`todopin-cli mcp`），OpenCode、Codex 等 Agent 可直接管理 TodoPin。
 - 无账号系统、无云同步、无数据采集。
@@ -32,13 +53,6 @@ TodoPin 采用本地优先设计。
 从 GitHub Releases 页面下载最新 `TodoPin.dmg`，打开后把 `TodoPin.app` 拖入 Applications。
 
 当前公开发布为 ad-hoc 签名，macOS 门禁可能提示"无法验证开发者"。生产分发请使用 Developer ID 证书签名并公证 DMG。
-
-## 默认快捷键
-
-- 文本快速录入：`Option + Space`
-- HUD 穿透/交互切换：`Option + Command + T`
-
-快捷键可在设置中修改。文本快捷键打开轻量输入面板。
 
 ## 命令行工具
 

@@ -30,7 +30,6 @@ let package = Package(
             ],
             linkerSettings: [
                 .linkedFramework("AppKit"),
-                .linkedFramework("Carbon"),
                 .linkedFramework("SwiftUI"),
                 .linkedFramework("UserNotifications")
             ]

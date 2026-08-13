@@ -2,12 +2,14 @@
 
 ## 项目概述
 
-TodoPin 是一个本地优先的 macOS 菜单栏待办应用（SwiftUI + Swift Package Manager），支持文本快速录入、桌面幽灵 HUD（无边框置顶、默认鼠标点击穿透）与本地通知，并提供 `todopin-cli` 命令行工具与 MCP Server 供 Agent 程序化管理任务。纯本地存储，无云同步。最低支持 macOS 14，工具链为 Swift 6（包声明 `swiftLanguageModes: [.v5]`）。
+TodoPin 是一个 **Agent native** 的本地优先 macOS 菜单栏待办应用（SwiftUI + Swift Package Manager）：任务的新增/修改/删除一律通过 MCP 由 Agent 完成，App 只负责展示（桌面幽灵 HUD，无边框置顶、默认鼠标点击穿透）与本地通知。纯本地存储，无云同步。最低支持 macOS 14，工具链为 Swift 6（包声明 `swiftLanguageModes: [.v5]`）。
+
+**Agent native 约束（易踩坑）**：UI 上唯一的写入口是 HUD 的「勾选完成」（`setCompleted`）；其余写操作必须走 MCP/CLI（`todopin-cli mcp` 或 `todopin-cli`），App 通过文件监听秒级刷新。不要给 App 层加任何录入/编辑 UI 或全局快捷键。
 
 ## 架构边界（易错点）
 
-- `Sources/TodoPinCore/`：纯业务逻辑层（Model、TodoStore、ReminderPolicy、TodoTimeParser、JSON 存储），**不得 import AppKit/SwiftUI**，保证可被测试目标独立编译运行。
-- `Sources/TodoPin/`：应用层（AppDelegate、窗口管理、全局快捷键、通知、文件监听），`@main` 入口在 `App/TodoPinApp.swift`。
+- `Sources/TodoPinCore/`：纯业务逻辑层（Model、TodoStore、JSON 存储），**不得 import AppKit/SwiftUI**，保证可被测试目标独立编译运行。
+- `Sources/TodoPin/`：应用层（AppDelegate、窗口管理、托盘菜单、通知、文件监听），`@main` 入口在 `App/TodoPinApp.swift`。无全局快捷键（Carbon 已移除）。
 - `Sources/TodoPinMCP/`：MCP 服务器协议与工具实现（纯 Foundation 库，不 import AppKit/SwiftUI，可被测试目标 import）。
 - `Sources/TodoPinCLI/`：`todopin-cli` 可执行工具（参数解析、输出格式化），依赖 TodoPinCore 与 TodoPinMCP。
 - `Tests/TodoPinCoreChecks/`：可执行测试目标，**不是 XCTest**（详见下节）。
@@ -35,7 +37,7 @@ swift run todopin-cli mcp           # 以 MCP stdio 服务器模式运行（供 
 ## 数据与依赖
 
 - 数据存于 `~/Library/Application Support/TodoPin/`（`todos.json`），偏好存 UserDefaults。路径定义在 `Sources/TodoPinCore/Support/StorageLocations.swift`。
-- 全局快捷键（Carbon 注册）：文本快速录入 `Option + Space`、HUD 穿透/交互切换 `⌥⌘T`，两者不可相同，App 层会校验。
+- 提醒为「定时提醒」：`reminderAt` 到点发本地通知并记录 `reminderSentAt`；无每小时提醒、无免打扰时段（ReminderPolicy/ReminderSettings 已删除）。
 
 ## 变更流程
 
