@@ -29,12 +29,12 @@
 
 ### Requirement: list_tasks 工具
 
-`list_tasks` SHALL 查询任务；`include_completed` 参数为 false 或省略时只返回未完成任务，为 true 时返回全部任务；返回的任务对象 MUST 包含 id、title、createdAt、completedAt、source、reminderAt、reminderSentAt、priority、dueAt、description、isCompleted 十一个字段，日期为 ISO8601 字符串。
+`list_tasks` SHALL 查询任务；`include_completed` 参数为 false 或省略时只返回未完成任务，为 true 时返回全部任务；返回的任务对象 MUST 包含 id、title、createdAt、completedAt、reminderAt、reminderSentAt、priority、dueAt、description、isCompleted 十个字段，日期为 ISO8601 字符串。
 
 #### Scenario: 查询未完成任务
 
 - **WHEN** 客户端调用 list_tasks 且未传 include_completed
-- **THEN** 返回全部未完成任务，按优先级（高→中→低）→ 截止日期升序排列，过期任务沉底，每项十一字段完整
+- **THEN** 返回全部未完成任务，按优先级（高→中→低）→ 截止日期升序排列，过期任务沉底，每项十字段完整
 
 #### Scenario: 查询全部任务
 
@@ -48,7 +48,7 @@
 #### Scenario: 创建纯文本任务
 
 - **WHEN** 客户端调用 create_task 且仅提供 title
-- **THEN** 创建任务，返回十一字段任务对象，优先级为「中」，无提醒与截止时间、无描述
+- **THEN** 创建任务，返回十字段任务对象，优先级为「中」，无提醒与截止时间、无描述
 
 #### Scenario: 创建带优先级与截止日期的任务
 

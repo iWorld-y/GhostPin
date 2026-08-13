@@ -91,11 +91,11 @@ func checkAddTrimsTitleAndIgnoresEmptyInput() throws {
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
     let store = makeStore(in: temporaryDirectory)
 
-    let empty = try store.add(title: "   \n  ", source: .text)
+    let empty = try store.add(title: "   \n  ")
     try check(empty == nil, "empty input should not create a todo")
     try check(store.items.isEmpty, "store should stay empty")
 
-    let item = try require(try store.add(title: "  买牛奶  ", source: .text), "expected a todo")
+    let item = try require(try store.add(title: "  买牛奶  "), "expected a todo")
     try check(item.title == "买牛奶", "title should be trimmed")
     try check(store.items.map(\.title) == ["买牛奶"], "store should contain trimmed title")
 }
@@ -107,8 +107,8 @@ func checkOpenItemsAreCreatedAtDescending() throws {
     let older = makeDate(year: 2026, month: 6, day: 14, hour: 9, minute: 0)
     let newer = makeDate(year: 2026, month: 6, day: 14, hour: 10, minute: 0)
 
-    _ = try store.add(title: "早一点", source: .text, createdAt: older)
-    _ = try store.add(title: "晚一点", source: .text, createdAt: newer)
+    _ = try store.add(title: "早一点", createdAt: older)
+    _ = try store.add(title: "晚一点", createdAt: newer)
 
     try check(store.openItems().map(\.title) == ["晚一点", "早一点"], "newer todos should be listed first")
 
@@ -121,7 +121,7 @@ func checkUpdateTitleTrimsPersistsAndIgnoresEmptyInput() throws {
     let temporaryDirectory = try makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
     let store = makeStore(in: temporaryDirectory)
-    let item = try require(try store.add(title: "旧标题", source: .text), "expected a todo")
+    let item = try require(try store.add(title: "旧标题"), "expected a todo")
 
     let updated = try require(try store.updateTitle(item.id, title: "  新标题  "), "expected an updated todo")
     try check(updated.title == "新标题", "updated title should be trimmed")
@@ -140,8 +140,8 @@ func checkCompletedItemsAreRemovedFromOpenItems() throws {
     let temporaryDirectory = try makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
     let store = makeStore(in: temporaryDirectory)
-    let first = try require(try store.add(title: "完成的事", source: .text), "expected first todo")
-    let second = try require(try store.add(title: "继续保留", source: .voice), "expected second todo")
+    let first = try require(try store.add(title: "完成的事"), "expected first todo")
+    let second = try require(try store.add(title: "继续保留"), "expected second todo")
 
     try store.setCompleted(first.id, completed: true)
 
@@ -154,7 +154,7 @@ func checkAddPersistsReminderTime() throws {
     let store = makeStore(in: temporaryDirectory)
     let reminderAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 30)
 
-    let item = try require(try store.add(title: "开会", source: .text, reminderAt: reminderAt), "expected a todo")
+    let item = try require(try store.add(title: "开会", reminderAt: reminderAt), "expected a todo")
     try check(item.reminderAt == reminderAt, "todo should keep reminder time")
 
     let reloaded = makeStore(in: temporaryDirectory)
@@ -168,7 +168,7 @@ func checkMarkTimedReminderSentPersists() throws {
     let store = makeStore(in: temporaryDirectory)
     let reminderAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 30)
     let sentAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 31)
-    let item = try require(try store.add(title: "开会", source: .text, reminderAt: reminderAt), "expected a todo")
+    let item = try require(try store.add(title: "开会", reminderAt: reminderAt), "expected a todo")
 
     try store.markTimedReminderSent(item.id, at: sentAt)
 
@@ -184,7 +184,7 @@ func checkUpdateChangesReminderTimeAndClearsSentTime() throws {
     let originalReminderAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 30)
     let sentAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 31)
     let changedReminderAt = makeDate(year: 2026, month: 6, day: 21, hour: 9, minute: 0)
-    let item = try require(try store.add(title: "开会", source: .text, reminderAt: originalReminderAt), "expected a todo")
+    let item = try require(try store.add(title: "开会", reminderAt: originalReminderAt), "expected a todo")
     try store.markTimedReminderSent(item.id, at: sentAt)
 
     let updated = try require(
@@ -208,7 +208,7 @@ func checkUpdateRemovesReminderTimeAndClearsSentTime() throws {
     let store = makeStore(in: temporaryDirectory)
     let reminderAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 30)
     let sentAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 31)
-    let item = try require(try store.add(title: "开会", source: .text, reminderAt: reminderAt), "expected a todo")
+    let item = try require(try store.add(title: "开会", reminderAt: reminderAt), "expected a todo")
     try store.markTimedReminderSent(item.id, at: sentAt)
 
     let updated = try require(try store.update(item.id, title: "开会", reminderAt: nil), "expected updated todo")
@@ -287,14 +287,11 @@ func checkHotKeyShortcutDefaults() throws {
     try check(HotKeyShortcut.defaultShortcut.keyCode == 49, "default shortcut should use Space key code")
     try check(HotKeyShortcut.defaultShortcut.modifiers == 2_048, "default shortcut should use Option modifier")
     try check(HotKeyShortcut.defaultTextShortcut == .optionSpace, "text shortcut should default to Option + Space")
-    try check(HotKeyShortcut.defaultVoiceShortcut == .f8, "voice shortcut should default to F8")
-    try check(HotKeyShortcut.defaultTextShortcut != HotKeyShortcut.defaultVoiceShortcut, "text and voice defaults should not conflict")
 }
 
 func checkHotKeyShortcutLegacyMigration() throws {
     try check(HotKeyShortcut.legacyPreset(rawValue: "optionSpace") == .optionSpace, "legacy optionSpace should migrate")
     try check(HotKeyShortcut.legacyPreset(rawValue: "optionN") == .optionN, "legacy optionN should migrate")
-    try check(HotKeyShortcut.legacyPreset(rawValue: "f8") == .f8, "legacy f8 should migrate")
     try check(HotKeyShortcut.legacyPreset(rawValue: "missing") == nil, "unknown legacy shortcut should not migrate")
 }
 
@@ -329,11 +326,11 @@ func checkHudItemsTodayScopeUsesDayBoundary() throws {
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
 
     _ = try require(
-        try store.add(title: "今天任务", source: .text, createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 1, minute: 0)),
+        try store.add(title: "今天任务", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 1, minute: 0)),
         "expected today todo"
     )
     _ = try require(
-        try store.add(title: "昨天任务", source: .text, createdAt: makeDate(year: 2026, month: 6, day: 14, hour: 23, minute: 59)),
+        try store.add(title: "昨天任务", createdAt: makeDate(year: 2026, month: 6, day: 14, hour: 23, minute: 59)),
         "expected yesterday todo"
     )
 
@@ -348,11 +345,11 @@ func checkHudItemsAllScopeIncludesEveryOpenItem() throws {
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
 
     _ = try require(
-        try store.add(title: "今天任务", source: .text, createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 1, minute: 0)),
+        try store.add(title: "今天任务", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 1, minute: 0)),
         "expected today todo"
     )
     _ = try require(
-        try store.add(title: "昨天任务", source: .text, createdAt: makeDate(year: 2026, month: 6, day: 14, hour: 23, minute: 59)),
+        try store.add(title: "昨天任务", createdAt: makeDate(year: 2026, month: 6, day: 14, hour: 23, minute: 59)),
         "expected yesterday todo"
     )
 
@@ -370,7 +367,6 @@ func checkHudItemsTruncatesToMaxCount() throws {
         _ = try require(
             try store.add(
                 title: "任务\(index)",
-                source: .text,
                 createdAt: makeDate(year: 2026, month: 6, day: 15, hour: index, minute: 0)
             ),
             "expected todo"
@@ -388,8 +384,8 @@ func checkHudItemsExcludesCompletedItems() throws {
     let store = makeStore(in: temporaryDirectory)
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
 
-    let completedItem = try require(try store.add(title: "待完成", source: .text), "expected todo")
-    _ = try require(try store.add(title: "保留", source: .text), "expected todo")
+    let completedItem = try require(try store.add(title: "待完成"), "expected todo")
+    _ = try require(try store.add(title: "保留"), "expected todo")
     try store.setCompleted(completedItem.id, completed: true)
 
     let hudItems = store.hudItems(scope: .all, maxCount: 10, now: now, calendar: checkCalendar)
@@ -397,7 +393,7 @@ func checkHudItemsExcludesCompletedItems() throws {
 }
 
 func checkDecodesLegacyTodoItemWithoutNewFields() throws {
-    let item = TodoItem(title: "旧任务", source: .text, reminderAt: nil)
+    let item = TodoItem(title: "旧任务", reminderAt: nil)
     let data = try JSONEncoder().encode(item)
     guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
         throw CheckFailure(message: "编码失败")
@@ -420,10 +416,10 @@ func checkSortsOpenItemsByPriorityThenDueDate() throws {
     let store = makeStore(in: temporaryDirectory)
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
 
-    _ = try store.add(title: "中-明天", source: .text, priority: .medium, dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 9, minute: 0))
-    _ = try store.add(title: "高-无截止", source: .text, priority: .high)
-    _ = try store.add(title: "低-今天", source: .text, priority: .low, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0))
-    _ = try store.add(title: "高-今天", source: .text, priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0))
+    _ = try store.add(title: "中-明天", priority: .medium, dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 9, minute: 0))
+    _ = try store.add(title: "高-无截止", priority: .high)
+    _ = try store.add(title: "低-今天", priority: .low, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0))
+    _ = try store.add(title: "高-今天", priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0))
 
     let titles = store.openItems(now: now).map(\.title)
     try check(
@@ -438,8 +434,8 @@ func checkSortsOverdueItemsToBottom() throws {
     let store = makeStore(in: temporaryDirectory)
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
 
-    _ = try store.add(title: "高-已过期", source: .text, priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 14, hour: 10, minute: 0))
-    _ = try store.add(title: "低-未过期", source: .text, priority: .low, dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 9, minute: 0))
+    _ = try store.add(title: "高-已过期", priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 14, hour: 10, minute: 0))
+    _ = try store.add(title: "低-未过期", priority: .low, dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 9, minute: 0))
 
     let titles = store.openItems(now: now).map(\.title)
     try check(titles == ["低-未过期", "高-已过期"], "过期任务应全局沉底，实际: \(titles)")
@@ -451,8 +447,8 @@ func checkSortsItemsWithoutDueDateLast() throws {
     let store = makeStore(in: temporaryDirectory)
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
 
-    _ = try store.add(title: "有截止", source: .text, priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 20, hour: 9, minute: 0))
-    _ = try store.add(title: "无截止", source: .text, priority: .high)
+    _ = try store.add(title: "有截止", priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 20, hour: 9, minute: 0))
+    _ = try store.add(title: "无截止", priority: .high)
 
     let titles = store.openItems(now: now).map(\.title)
     try check(titles == ["有截止", "无截止"], "同优先级无截止日期应排后，实际: \(titles)")
@@ -570,11 +566,11 @@ func checkLoadReflectsExternalChange() throws {
     let temporaryDirectory = try makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
     let store = makeStore(in: temporaryDirectory)
-    _ = try require(try store.add(title: "初始任务", source: .text), "expected todo")
+    _ = try require(try store.add(title: "初始任务"), "expected todo")
 
     let external = makeStore(in: temporaryDirectory)
     try external.load()
-    _ = try require(try external.add(title: "外部任务", source: .text), "expected external todo")
+    _ = try require(try external.add(title: "外部任务"), "expected external todo")
 
     try store.load()
     try check(store.items.map(\.title) == ["外部任务", "初始任务"], "load should reflect external change")
@@ -584,7 +580,7 @@ func checkLoadSkipsPublishWhenUnchanged() throws {
     let temporaryDirectory = try makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
     let store = makeStore(in: temporaryDirectory)
-    _ = try require(try store.add(title: "任务", source: .text), "expected todo")
+    _ = try require(try store.add(title: "任务"), "expected todo")
 
     var publishCount = 0
     let cancellable = store.objectWillChange.sink { publishCount += 1 }
@@ -599,7 +595,7 @@ func checkLoadClearsItemsWhenFileMissing() throws {
     let temporaryDirectory = try makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
     let store = makeStore(in: temporaryDirectory)
-    _ = try require(try store.add(title: "任务", source: .text), "expected todo")
+    _ = try require(try store.add(title: "任务"), "expected todo")
 
     try FileManager.default.removeItem(at: temporaryDirectory.appendingPathComponent("todos.json"))
 
@@ -924,7 +920,7 @@ func checkMCPFreshStore() throws {
 
     let externalStore = makeStore(in: temporaryDirectory)
     try externalStore.load()
-    _ = try require(try externalStore.add(title: "外部写入", source: .text), "外部写入失败")
+    _ = try require(try externalStore.add(title: "外部写入"), "外部写入失败")
 
     let listResponse = try require(
         server.process(frame: mcpToolsCall(id: 2, name: "list_tasks", arguments: "{}")),

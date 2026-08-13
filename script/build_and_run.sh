@@ -29,11 +29,6 @@ mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
 
-if [[ -d "$BUILD_DIR/whisper.framework" ]]; then
-  cp -R "$BUILD_DIR/whisper.framework" "$APP_FRAMEWORKS/"
-  install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_BINARY" >/dev/null 2>&1 || true
-fi
-
 if [[ -d "$ROOT_DIR/Sources/TodoPin/Resources" ]]; then
   rsync -a --exclude 'Models/README.md' "$ROOT_DIR/Sources/TodoPin/Resources/" "$APP_RESOURCES/"
 fi
@@ -57,8 +52,6 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$MIN_SYSTEM_VERSION</string>
   <key>NSHighResolutionCapable</key>
   <true/>
-  <key>NSMicrophoneUsageDescription</key>
-  <string>TodoPin uses the microphone only to turn your short to-do voice notes into local text.</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
 </dict>

@@ -81,7 +81,7 @@
 #### Scenario: JSON 列表输出
 
 - **WHEN** 用户执行 `todopin-cli list --json`
-- **THEN** 标准输出为 JSON 数组，每项包含 id、title、createdAt、completedAt、source、reminderAt、reminderSentAt、priority、dueAt、description、isCompleted 字段，日期为 ISO8601 字符串
+- **THEN** 标准输出为 JSON 数组，每项包含 id、title、createdAt、completedAt、reminderAt、reminderSentAt、priority、dueAt、description、isCompleted 字段，日期为 ISO8601 字符串
 
 #### Scenario: JSON 成功结果
 

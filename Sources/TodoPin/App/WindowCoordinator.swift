@@ -4,7 +4,6 @@ import SwiftUI
 final class WindowCoordinator: NSObject, NSWindowDelegate {
     private weak var appState: AppState?
     private var quickAddWindow: NSWindow?
-    private var voiceCaptureWindow: NSWindow?
     private var boardWindow: NSWindow?
 
     init(appState: AppState) {
@@ -43,45 +42,6 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
 
         NSApp.activate(ignoringOtherApps: true)
         quickAddWindow?.makeKeyAndOrderFront(nil)
-    }
-
-    func showVoiceCapture() {
-        guard let appState else {
-            return
-        }
-
-        if voiceCaptureWindow?.isVisible == true {
-            voiceCaptureWindow?.orderFrontRegardless()
-            return
-        }
-
-        if voiceCaptureWindow == nil {
-            let window = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 250, height: 210),
-                styleMask: [.titled, .closable, .fullSizeContentView],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = "TodoPin 语音录入"
-            window.isReleasedWhenClosed = false
-            window.delegate = self
-            configureFloatingPanel(window, hidesStandardButtons: true)
-            window.hidesOnDeactivate = false
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            window.center()
-            voiceCaptureWindow = window
-        }
-
-        voiceCaptureWindow?.contentView = NSHostingView(
-            rootView: VoiceCaptureOverlayView(
-                appState: appState,
-                onClose: { [weak self] in
-                    self?.voiceCaptureWindow?.close()
-                }
-            )
-        )
-        updateBoardLevel()
-        voiceCaptureWindow?.orderFrontRegardless()
     }
 
     func showBoard() {
@@ -130,13 +90,8 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         boardWindow?.orderOut(nil)
     }
 
-    func showSummary() {
-        appState?.generateTodaySummary()
-    }
-
     func updateBoardLevel() {
         quickAddWindow?.level = appState?.preferences.keepBoardOnTop == true ? .floating : .normal
-        voiceCaptureWindow?.level = .floating
     }
 
     func updateHUD() {
@@ -168,8 +123,6 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         if notification.object as AnyObject? === quickAddWindow {
             quickAddWindow?.contentView = nil
-        } else if notification.object as AnyObject? === voiceCaptureWindow {
-            voiceCaptureWindow?.contentView = nil
         } else if notification.object as AnyObject? === boardWindow {
             boardWindow?.contentView = nil
         }

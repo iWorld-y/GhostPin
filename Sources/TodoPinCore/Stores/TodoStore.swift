@@ -44,7 +44,6 @@ public final class TodoStore: ObservableObject {
     @discardableResult
     public func add(
         title: String,
-        source: TodoSource,
         createdAt: Date = Date(),
         reminderAt: Date? = nil,
         priority: Priority = .medium,
@@ -59,7 +58,6 @@ public final class TodoStore: ObservableObject {
         let item = TodoItem(
             title: trimmed,
             createdAt: createdAt,
-            source: source,
             reminderAt: reminderAt,
             priority: priority,
             dueAt: dueAt,

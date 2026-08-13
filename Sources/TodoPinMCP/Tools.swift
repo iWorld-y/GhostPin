@@ -93,7 +93,6 @@ private let createTaskTool = ToolDefinition(
     let store = try makeStore(at: storeURL)
     guard let item = try store.add(
         title: title,
-        source: .text,
         reminderAt: reminderAt,
         priority: priority,
         dueAt: dueAt,

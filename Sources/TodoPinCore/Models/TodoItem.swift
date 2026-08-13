@@ -5,7 +5,6 @@ public struct TodoItem: Identifiable, Codable, Equatable, Sendable {
     public var title: String
     public let createdAt: Date
     public var completedAt: Date?
-    public var source: TodoSource
     public var reminderAt: Date?
     public var reminderSentAt: Date?
     public var priority: Priority
@@ -17,7 +16,6 @@ public struct TodoItem: Identifiable, Codable, Equatable, Sendable {
         title: String,
         createdAt: Date = Date(),
         completedAt: Date? = nil,
-        source: TodoSource,
         reminderAt: Date? = nil,
         reminderSentAt: Date? = nil,
         priority: Priority = .medium,
@@ -28,7 +26,6 @@ public struct TodoItem: Identifiable, Codable, Equatable, Sendable {
         self.title = title
         self.createdAt = createdAt
         self.completedAt = completedAt
-        self.source = source
         self.reminderAt = reminderAt
         self.reminderSentAt = reminderSentAt
         self.priority = priority
@@ -42,7 +39,6 @@ public struct TodoItem: Identifiable, Codable, Equatable, Sendable {
         self.title = try container.decode(String.self, forKey: .title)
         self.createdAt = try container.decode(Date.self, forKey: .createdAt)
         self.completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
-        self.source = try container.decode(TodoSource.self, forKey: .source)
         self.reminderAt = try container.decodeIfPresent(Date.self, forKey: .reminderAt)
         self.reminderSentAt = try container.decodeIfPresent(Date.self, forKey: .reminderSentAt)
         self.priority = try container.decodeIfPresent(Priority.self, forKey: .priority) ?? .medium

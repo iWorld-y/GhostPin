@@ -5,9 +5,7 @@ import TodoPinCore
 
 final class AppState: ObservableObject {
     let todoStore: TodoStore
-    let summaryStore: SummaryStore
     let preferences: AppPreferences
-    let speechModelManager: SpeechModelManager
 
     @Published var lastErrorMessage: String?
 
@@ -18,7 +16,6 @@ final class AppState: ObservableObject {
     private let hotKeyService = HotKeyService()
     private lazy var reminderService = ReminderService(
         todoStore: todoStore,
-        summaryStore: summaryStore,
         preferences: preferences,
         notificationService: notificationService
     )
@@ -33,18 +30,12 @@ final class AppState: ObservableObject {
 
         self.todosURL = (try? StorageLocations.todosURL(fileManager: fileManager))
             ?? fallbackDirectory.appendingPathComponent("todos.json")
-        let summariesURL = (try? StorageLocations.summariesURL(fileManager: fileManager))
-            ?? fallbackDirectory.appendingPathComponent("summaries.json")
 
         self.todoStore = TodoStore(fileURL: self.todosURL, fileManager: fileManager)
-        self.summaryStore = SummaryStore(fileURL: summariesURL, fileManager: fileManager)
         self.preferences = AppPreferences()
-        self.speechModelManager = SpeechModelManager()
 
         do {
             try todoStore.load()
-            try summaryStore.load()
-            try summaryStore.generateMissingSummaries(upTo: Date(), todos: todoStore.items)
         } catch {
             lastErrorMessage = error.localizedDescription
         }
@@ -53,21 +44,12 @@ final class AppState: ObservableObject {
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
 
-        summaryStore.objectWillChange
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
-
         preferences.objectWillChange
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
-
-        speechModelManager.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
     }
 
     func start() {
-        speechModelManager.refresh()
         notificationService.requestAuthorization()
         do {
             try registerHotKeys()
@@ -94,11 +76,6 @@ final class AppState: ObservableObject {
         windowCoordinator.showQuickAdd()
     }
 
-    func startVoiceCapture() {
-        speechModelManager.refresh()
-        windowCoordinator.showVoiceCapture()
-    }
-
     func showBoard() {
         windowCoordinator.showBoard()
     }
@@ -117,13 +94,9 @@ final class AppState: ObservableObject {
         windowCoordinator.updateHUD()
     }
 
-    func showSummary() {
-        windowCoordinator.showSummary()
-    }
-
-    func addTodo(title: String, source: TodoSource, reminderAt: Date? = nil) {
+    func addTodo(title: String, reminderAt: Date? = nil) {
         do {
-            _ = try todoStore.add(title: title, source: source, reminderAt: reminderAt)
+            _ = try todoStore.add(title: title, reminderAt: reminderAt)
         } catch {
             report(error)
         }
@@ -168,21 +141,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    func generateTodaySummary() {
-        do {
-            let summary = try summaryStore.generateSummary(for: Date(), todos: todoStore.items)
-            notificationService.sendSummary(summary)
-        } catch {
-            report(error)
-        }
-    }
-
     func updateTextHotKey(_ shortcut: HotKeyShortcut) {
-        guard shortcut != preferences.voiceHotKeyShortcut else {
-            lastErrorMessage = "文本录入和语音录入不能使用同一个快捷键。"
-            return
-        }
-
         let previousShortcut = preferences.textHotKeyShortcut
         preferences.textHotKeyShortcut = shortcut
 
@@ -196,29 +155,9 @@ final class AppState: ObservableObject {
         }
     }
 
-    func updateVoiceHotKey(_ shortcut: HotKeyShortcut) {
-        guard shortcut != preferences.textHotKeyShortcut else {
-            lastErrorMessage = "文本录入和语音录入不能使用同一个快捷键。"
-            return
-        }
-
-        let previousShortcut = preferences.voiceHotKeyShortcut
-        preferences.voiceHotKeyShortcut = shortcut
-
-        do {
-            try registerHotKeys()
-            lastErrorMessage = nil
-        } catch {
-            preferences.voiceHotKeyShortcut = previousShortcut
-            try? registerHotKeys()
-            report(error)
-        }
-    }
-
     func updateHUDModeHotKey(_ shortcut: HotKeyShortcut) {
-        guard shortcut != preferences.textHotKeyShortcut,
-              shortcut != preferences.voiceHotKeyShortcut else {
-            lastErrorMessage = "HUD 模式切换不能与文本录入或语音录入使用同一个快捷键。"
+        guard shortcut != preferences.textHotKeyShortcut else {
+            lastErrorMessage = "HUD 模式切换不能与文本录入使用同一个快捷键。"
             return
         }
 
@@ -270,13 +209,6 @@ final class AppState: ObservableObject {
                     shortcut: preferences.textHotKeyShortcut,
                     onTrigger: { [weak self] in
                         self?.showQuickAdd()
-                    }
-                ),
-                HotKeyRegistration(
-                    id: 2,
-                    shortcut: preferences.voiceHotKeyShortcut,
-                    onTrigger: { [weak self] in
-                        self?.startVoiceCapture()
                     }
                 ),
                 HotKeyRegistration(

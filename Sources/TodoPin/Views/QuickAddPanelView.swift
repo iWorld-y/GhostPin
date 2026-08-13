@@ -129,11 +129,11 @@ struct QuickAddPanelView: View {
     }
 
     private func addDraft() {
-        addTodoOrConfirmReminder(title: draftTitle, source: .text)
+        addTodoOrConfirmReminder(title: draftTitle)
         draftTitle = ""
     }
 
-    private func addTodoOrConfirmReminder(title: String, source: TodoSource) {
+    private func addTodoOrConfirmReminder(title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return
@@ -142,11 +142,10 @@ struct QuickAddPanelView: View {
         if let parsedReminder = timeParser.parse(trimmed) {
             pendingReminderDraft = PendingReminderDraft(
                 title: trimmed,
-                source: source,
                 parsedReminder: parsedReminder
             )
         } else {
-            appState.addTodo(title: trimmed, source: source)
+            appState.addTodo(title: trimmed)
             onClose()
         }
     }
@@ -157,7 +156,6 @@ struct QuickAddPanelView: View {
         }
         appState.addTodo(
             title: pendingReminderDraft.title,
-            source: pendingReminderDraft.source,
             reminderAt: pendingReminderDraft.parsedReminder.date
         )
         self.pendingReminderDraft = nil
@@ -168,7 +166,7 @@ struct QuickAddPanelView: View {
         guard let pendingReminderDraft else {
             return
         }
-        appState.addTodo(title: pendingReminderDraft.title, source: pendingReminderDraft.source)
+        appState.addTodo(title: pendingReminderDraft.title)
         self.pendingReminderDraft = nil
         onClose()
     }

@@ -6,14 +6,13 @@
 
 **中文** · [English](README.en.md)
 
-TodoPin 是一个本地优先的 macOS 菜单栏待办应用（SwiftUI + Swift Package Manager），支持文本快速录入、可选本地语音识别（whisper.cpp）、桌面幽灵 HUD 与本地通知。纯本地存储，无云同步。最低支持 macOS 14，工具链为 Swift 6（包声明 `swiftLanguageModes: [.v5]`）。
+TodoPin 是一个本地优先的 macOS 菜单栏待办应用（SwiftUI + Swift Package Manager），支持文本快速录入、桌面幽灵 HUD 与本地通知。纯本地存储，无云同步。最低支持 macOS 14，工具链为 Swift 6（包声明 `swiftLanguageModes: [.v5]`）。
 
 ## 功能
 
 - 菜单栏待办面板，快速捕捉与管理任务。
 - 桌面幽灵 HUD：无边框、始终置顶、透明度可调，默认鼠标点击穿透不打扰工作，按 `⌥⌘T` 在穿透/交互模式间切换；窗口位置、尺寸、透明度、模式与显示范围重启后自动恢复。
 - 文本快速录入，自动解析中文提醒时间（如"明天 9 点"）。
-- 可选本地语音录入，基于 whisper.cpp 离线转写。
 - 编辑标题与提醒时间、完成、删除；未完成任务每小时提醒，直到完成。
 - 本地 macOS 通知；支持登录时启动。
 - `todopin-cli` 命令行工具（list / add / done / undone / update / delete，`--json` 输出），供脚本与 Agent 调用。
@@ -25,10 +24,8 @@ TodoPin 是一个本地优先的 macOS 菜单栏待办应用（SwiftUI + Swift P
 TodoPin 采用本地优先设计。
 
 - 待办保存在 `~/Library/Application Support/TodoPin/todos.json`。
-- 每日汇总保存在 `~/Library/Application Support/TodoPin/summaries.json`。
 - 偏好设置保存在 macOS `UserDefaults`。
-- 音频在本机采集与转写，不上传待办或录音。
-- 仅当你从设置中显式下载可选语音模型，或从源码构建依赖时，应用才会联网。
+- 应用除构建依赖外不联网。
 
 ## 安装
 
@@ -39,36 +36,9 @@ TodoPin 采用本地优先设计。
 ## 默认快捷键
 
 - 文本快速录入：`Option + Space`
-- 语音录入：`F8`
 - HUD 穿透/交互切换：`Option + Command + T`
 
-快捷键可在设置中修改。文本快捷键打开轻量输入面板；语音快捷键只显示桌面录音动画，转写成功后自动保存待办。
-
-## 语音模型
-
-语音输入是可选的。TodoPin 使用 whisper.cpp，默认模型：
-
-- `ggml-base-q5_1.bin`
-- SHA-256: `422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898`
-
-模型文件刻意不提交进 git。
-
-安装模型有两种方式：
-
-1. 打开 TodoPin 设置，点击模型下载按钮。
-2. 或运行：
-
-```bash
-./script/fetch_models.sh
-```
-
-应用内下载的模型存放于：
-
-```text
-~/Library/Application Support/TodoPin/Models/ggml-base-q5_1.bin
-```
-
-即使没有语音模型，手动输入依然可用。
+快捷键可在设置中修改。文本快捷键打开轻量输入面板。
 
 ## 命令行工具
 
@@ -138,14 +108,6 @@ swift run TodoPinCoreChecks
 ./script/package_dmg.sh
 ```
 
-默认情况下发布 DMG 不包含语音模型，用户之后可在设置中下载。
-
-构建带模型的本地包：
-
-```bash
-TODO_PIN_INCLUDE_MODEL=1 ./script/package_dmg.sh
-```
-
 ## 签名与分发
 
 打包脚本默认使用 ad-hoc 签名。
@@ -165,9 +127,9 @@ Sources/TodoPin/             macOS SwiftUI 应用
 Sources/TodoPinCore/         待办、提醒、解析与存储的核心逻辑
 Sources/TodoPinCLI/          todopin-cli 命令行工具
 Sources/TodoPinMCP/          MCP 服务器协议与工具实现
-Sources/TodoPin/Resources/   应用图标、Logo 与可选模型目录
+Sources/TodoPin/Resources/   应用图标与 Logo
 Tests/TodoPinCoreChecks/     可执行核心行为检查
-script/                      模型下载、应用打包与 DMG 脚本
+script/                      应用打包与 DMG 脚本
 ```
 
 ## 许可证
