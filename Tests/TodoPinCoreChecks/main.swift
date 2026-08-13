@@ -36,6 +36,13 @@ let checks: [Check] = [
     ("TodoStore.hudItems all scope includes every open item", checkHudItemsAllScopeIncludesEveryOpenItem),
     ("TodoStore.hudItems truncates to maxCount keeping newest first", checkHudItemsTruncatesToMaxCount),
     ("TodoStore.hudItems excludes completed items", checkHudItemsExcludesCompletedItems),
+    ("TodoItem decodes legacy data with default priority", checkDecodesLegacyTodoItemWithoutNewFields),
+    ("TodoStore sorts open items by priority then due date", checkSortsOpenItemsByPriorityThenDueDate),
+    ("TodoStore sinks overdue items to bottom", checkSortsOverdueItemsToBottom),
+    ("TodoStore sorts items without due date after those with", checkSortsItemsWithoutDueDateLast),
+    ("MCP create_task accepts priority due_at description", checkMCPCreateTaskWithNewFields),
+    ("MCP update_task changes priority due_at and clears due", checkMCPUpdateTaskWithNewFields),
+    ("MCP rejects invalid priority and due_at", checkMCPInvalidPriorityAndDueDate),
     ("TodoStore.load reflects external file changes", checkLoadReflectsExternalChange),
     ("TodoStore.load skips publish when content unchanged", checkLoadSkipsPublishWhenUnchanged),
     ("TodoStore.load clears items when file missing", checkLoadClearsItemsWhenFileMissing),
@@ -387,6 +394,176 @@ func checkHudItemsExcludesCompletedItems() throws {
 
     let hudItems = store.hudItems(scope: .all, maxCount: 10, now: now, calendar: checkCalendar)
     try check(hudItems.map(\.title) == ["保留"], "completed items should disappear from HUD")
+}
+
+func checkDecodesLegacyTodoItemWithoutNewFields() throws {
+    let item = TodoItem(title: "旧任务", source: .text, reminderAt: nil)
+    let data = try JSONEncoder().encode(item)
+    guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        throw CheckFailure(message: "编码失败")
+    }
+    object.removeValue(forKey: "priority")
+    object.removeValue(forKey: "dueAt")
+    object.removeValue(forKey: "description")
+
+    let legacyData = try JSONSerialization.data(withJSONObject: object)
+    let decoded = try JSONDecoder().decode(TodoItem.self, from: legacyData)
+    try check(decoded.title == "旧任务", "旧数据标题应保留")
+    try check(decoded.priority == .medium, "旧数据缺失 priority 应默认为中")
+    try check(decoded.dueAt == nil, "旧数据缺失 dueAt 应为 nil")
+    try check(decoded.description == nil, "旧数据缺失 description 应为 nil")
+}
+
+func checkSortsOpenItemsByPriorityThenDueDate() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    _ = try store.add(title: "中-明天", source: .text, priority: .medium, dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 9, minute: 0))
+    _ = try store.add(title: "高-无截止", source: .text, priority: .high)
+    _ = try store.add(title: "低-今天", source: .text, priority: .low, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0))
+    _ = try store.add(title: "高-今天", source: .text, priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0))
+
+    let titles = store.openItems(now: now).map(\.title)
+    try check(
+        titles == ["高-今天", "高-无截止", "中-明天", "低-今天"],
+        "应按优先级→截止日期排序，实际: \(titles)"
+    )
+}
+
+func checkSortsOverdueItemsToBottom() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    _ = try store.add(title: "高-已过期", source: .text, priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 14, hour: 10, minute: 0))
+    _ = try store.add(title: "低-未过期", source: .text, priority: .low, dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 9, minute: 0))
+
+    let titles = store.openItems(now: now).map(\.title)
+    try check(titles == ["低-未过期", "高-已过期"], "过期任务应全局沉底，实际: \(titles)")
+}
+
+func checkSortsItemsWithoutDueDateLast() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    _ = try store.add(title: "有截止", source: .text, priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 20, hour: 9, minute: 0))
+    _ = try store.add(title: "无截止", source: .text, priority: .high)
+
+    let titles = store.openItems(now: now).map(\.title)
+    try check(titles == ["有截止", "无截止"], "同优先级无截止日期应排后，实际: \(titles)")
+}
+
+func checkMCPCreateTaskWithNewFields() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let server = makeMCPServer(in: temporaryDirectory)
+
+    let createResponse = try require(
+        server.process(frame: mcpToolsCall(
+            id: 1,
+            name: "create_task",
+            arguments: #"{"title":"带字段","priority":"high","due_at":"2026-08-20T18:00:00+08:00","description":"具体说明"}"#
+        )),
+        "create_task 应有响应"
+    )
+    let created = try toolResultPayload(createResponse)
+    let createdTitle = try payloadString(created, "title")
+    try check(createdTitle == "带字段", "create_task 标题错误")
+    let createdPriority = try payloadString(created, "priority")
+    try check(createdPriority == "high", "create_task priority 应为 high，实际: \(createdPriority)")
+    let dueText = try payloadString(created, "dueAt")
+    try check(dueText.hasPrefix("2026-08-20"), "create_task dueAt 应为 2026-08-20，实际: \(dueText)")
+    let createdDescription = try payloadString(created, "description")
+    try check(createdDescription == "具体说明", "create_task description 错误")
+}
+
+func checkMCPUpdateTaskWithNewFields() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let server = makeMCPServer(in: temporaryDirectory)
+
+    let createResponse = try require(
+        server.process(frame: mcpToolsCall(id: 1, name: "create_task", arguments: #"{"title":"待改"}"#)),
+        "create_task 应有响应"
+    )
+    let created = try toolResultPayload(createResponse)
+    let id = try payloadID(created)
+    let defaultPriority = try payloadString(created, "priority")
+    try check(defaultPriority == "medium", "默认优先级应为 medium，实际: \(defaultPriority)")
+
+    let updateResponse = try require(
+        server.process(frame: mcpToolsCall(
+            id: 2,
+            name: "update_task",
+            arguments: #"{"id":""# + id + #"","priority":"low","due_at":"2026-08-22T10:00:00+08:00","description":"新描述"}"#
+        )),
+        "update_task 应有响应"
+    )
+    let updated = try toolResultPayload(updateResponse)
+    let updatedPriority = try payloadString(updated, "priority")
+    try check(updatedPriority == "low", "update_task priority 应为 low，实际: \(updatedPriority)")
+    let dueText = try payloadString(updated, "dueAt")
+    try check(dueText.hasPrefix("2026-08-22"), "update_task dueAt 应为 2026-08-22，实际: \(dueText)")
+    let updatedDescription = try payloadString(updated, "description")
+    try check(updatedDescription == "新描述", "update_task description 错误")
+
+    let clearResponse = try require(
+        server.process(frame: mcpToolsCall(
+            id: 3,
+            name: "update_task",
+            arguments: #"{"id":""# + id + #"","clear_due":true}"#
+        )),
+        "update_task 应有响应"
+    )
+    let cleared = try toolResultPayload(clearResponse)
+    guard case .object(let clearedObject) = cleared,
+          clearedObject["dueAt"] == .null else {
+        throw CheckFailure(message: "clear_due 后 dueAt 应为 null")
+    }
+    let clearedPriority = try payloadString(cleared, "priority")
+    try check(clearedPriority == "low", "clear_due 不应影响优先级")
+}
+
+func checkMCPInvalidPriorityAndDueDate() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let server = makeMCPServer(in: temporaryDirectory)
+
+    let badPriorityResponse = try require(
+        server.process(frame: mcpToolsCall(
+            id: 1,
+            name: "create_task",
+            arguments: #"{"title":"x","priority":"urgent"}"#
+        )),
+        "非法优先级应有响应"
+    )
+    let badPriorityIsError = try toolResultIsError(badPriorityResponse)
+    try check(badPriorityIsError, "非法 priority 应返回 isError")
+
+    let badDueResponse = try require(
+        server.process(frame: mcpToolsCall(
+            id: 2,
+            name: "create_task",
+            arguments: #"{"title":"x","due_at":"not-a-date"}"#
+        )),
+        "非法截止时间应有响应"
+    )
+    let badDueIsError = try toolResultIsError(badDueResponse)
+    try check(badDueIsError, "非法 due_at 应返回 isError")
+
+    let listResponse = try require(
+        server.process(frame: mcpToolsCall(id: 3, name: "list_tasks", arguments: "{}")),
+        "list_tasks 应有响应"
+    )
+    guard case .array(let items) = try toolResultPayload(listResponse) else {
+        throw CheckFailure(message: "list_tasks 应返回数组")
+    }
+    try check(items.isEmpty, "非法参数不应创建任务")
 }
 
 func checkLoadReflectsExternalChange() throws {

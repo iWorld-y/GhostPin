@@ -147,7 +147,14 @@ final class AppState: ObservableObject {
 
     func updateTodo(_ item: TodoItem, title: String, reminderAt: Date?) {
         do {
-            _ = try todoStore.update(item.id, title: title, reminderAt: reminderAt)
+            _ = try todoStore.update(
+                item.id,
+                title: title,
+                reminderAt: reminderAt,
+                priority: item.priority,
+                dueAt: item.dueAt,
+                description: item.description
+            )
         } catch {
             report(error)
         }

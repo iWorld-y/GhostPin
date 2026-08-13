@@ -6,12 +6,12 @@
 
 ### Requirement: 查询任务
 
-`todopin-cli list` SHALL 默认列出全部未完成任务（按创建时间倒序）；`--all` 时列出全部任务（含已完成）。
+`todopin-cli list` SHALL 默认列出全部未完成任务（按优先级→截止日期排序）；`--all` 时列出全部任务（含已完成）。
 
 #### Scenario: 默认列出未完成
 
 - **WHEN** 用户执行 `todopin-cli list`
-- **THEN** 输出全部未完成任务，按创建时间从新到旧排列，不包含已完成任务
+- **THEN** 输出全部未完成任务，按优先级（高→中→低）→ 截止日期升序排列，不包含已完成任务
 
 #### Scenario: 列出全部
 
@@ -81,7 +81,7 @@
 #### Scenario: JSON 列表输出
 
 - **WHEN** 用户执行 `todopin-cli list --json`
-- **THEN** 标准输出为 JSON 数组，每项包含 id、title、createdAt、completedAt、source、reminderAt、reminderSentAt、isCompleted 字段，日期为 ISO8601 字符串
+- **THEN** 标准输出为 JSON 数组，每项包含 id、title、createdAt、completedAt、source、reminderAt、reminderSentAt、priority、dueAt、description、isCompleted 字段，日期为 ISO8601 字符串
 
 #### Scenario: JSON 成功结果
 

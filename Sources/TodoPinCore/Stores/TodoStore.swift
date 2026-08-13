@@ -46,14 +46,25 @@ public final class TodoStore: ObservableObject {
         title: String,
         source: TodoSource,
         createdAt: Date = Date(),
-        reminderAt: Date? = nil
+        reminderAt: Date? = nil,
+        priority: Priority = .medium,
+        dueAt: Date? = nil,
+        description: String? = nil
     ) throws -> TodoItem? {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return nil
         }
 
-        let item = TodoItem(title: trimmed, createdAt: createdAt, source: source, reminderAt: reminderAt)
+        let item = TodoItem(
+            title: trimmed,
+            createdAt: createdAt,
+            source: source,
+            reminderAt: reminderAt,
+            priority: priority,
+            dueAt: dueAt,
+            description: description
+        )
         items.append(item)
         items = Self.sortByCreatedAtDescending(items)
         try save()
@@ -78,11 +89,28 @@ public final class TodoStore: ObservableObject {
 
     @discardableResult
     public func updateTitle(_ id: TodoItem.ID, title: String) throws -> TodoItem? {
-        try update(id, title: title, reminderAt: items.first { $0.id == id }?.reminderAt)
+        guard let current = items.first(where: { $0.id == id }) else {
+            return nil
+        }
+        return try update(
+            id,
+            title: title,
+            reminderAt: current.reminderAt,
+            priority: current.priority,
+            dueAt: current.dueAt,
+            description: current.description
+        )
     }
 
     @discardableResult
-    public func update(_ id: TodoItem.ID, title: String, reminderAt: Date?) throws -> TodoItem? {
+    public func update(
+        _ id: TodoItem.ID,
+        title: String,
+        reminderAt: Date?,
+        priority: Priority = .medium,
+        dueAt: Date? = nil,
+        description: String? = nil
+    ) throws -> TodoItem? {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               let index = items.firstIndex(where: { $0.id == id }) else {
@@ -92,6 +120,9 @@ public final class TodoStore: ObservableObject {
         let oldReminderAt = items[index].reminderAt
         items[index].title = trimmed
         items[index].reminderAt = reminderAt
+        items[index].priority = priority
+        items[index].dueAt = dueAt
+        items[index].description = description
         if oldReminderAt != reminderAt {
             items[index].reminderSentAt = nil
         }
@@ -104,8 +135,9 @@ public final class TodoStore: ObservableObject {
         try save()
     }
 
-    public func openItems() -> [TodoItem] {
-        Self.sortByCreatedAtDescending(items.filter { !$0.isCompleted })
+    public func openItems(now: Date = Date()) -> [TodoItem] {
+        items.filter { !$0.isCompleted }
+            .sorted { Self.isOrderedBefore($0, $1, now: now) }
     }
 
     public func hudItems(
@@ -114,7 +146,7 @@ public final class TodoStore: ObservableObject {
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> [TodoItem] {
-        let open = openItems()
+        let open = openItems(now: now)
         let scoped: [TodoItem]
         switch scope {
         case .all:
@@ -140,5 +172,29 @@ public final class TodoStore: ObservableObject {
 
     private static func sortByCreatedAtDescending(_ items: [TodoItem]) -> [TodoItem] {
         items.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    private static func isOrderedBefore(_ lhs: TodoItem, _ rhs: TodoItem, now: Date) -> Bool {
+        let lhsOverdue = lhs.isOverdue(now: now)
+        let rhsOverdue = rhs.isOverdue(now: now)
+        if lhsOverdue != rhsOverdue {
+            return !lhsOverdue
+        }
+        if lhs.priority != rhs.priority {
+            return lhs.priority > rhs.priority
+        }
+        switch (lhs.dueAt, rhs.dueAt) {
+        case let (lhsDue?, rhsDue?):
+            if lhsDue != rhsDue {
+                return lhsDue < rhsDue
+            }
+            return lhs.createdAt > rhs.createdAt
+        case (nil, nil):
+            return lhs.createdAt > rhs.createdAt
+        case (nil, _):
+            return false
+        case (_, nil):
+            return true
+        }
     }
 }

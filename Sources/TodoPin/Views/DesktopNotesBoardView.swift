@@ -237,11 +237,24 @@ private struct DesktopNoteCardView: View {
             .help("标记完成")
 
             VStack(alignment: .leading, spacing: 7) {
-                Text(item.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(item.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .strikethrough(item.isOverdue(), color: .red)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    priorityBadge
+                }
+
+                if let description = item.description, !description.isEmpty {
+                    Text(description)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 HStack(spacing: 7) {
                     Label(Self.createdFormatter.string(from: item.createdAt), systemImage: "clock")
@@ -298,6 +311,37 @@ private struct DesktopNoteCardView: View {
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             )
+    }
+
+    private var priorityBadge: some View {
+        Text(priorityLabel)
+            .font(.system(size: 10, weight: .semibold))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(priorityColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .foregroundStyle(priorityColor)
+    }
+
+    private var priorityLabel: String {
+        switch item.priority {
+        case .high:
+            return "高"
+        case .medium:
+            return "中"
+        case .low:
+            return "低"
+        }
+    }
+
+    private var priorityColor: Color {
+        switch item.priority {
+        case .high:
+            return .red
+        case .medium:
+            return .orange
+        case .low:
+            return .secondary
+        }
     }
 
     private static let createdFormatter: DateFormatter = {

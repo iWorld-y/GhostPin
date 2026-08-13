@@ -55,7 +55,7 @@ private let listTasksTool = ToolDefinition(
 
 private let createTaskTool = ToolDefinition(
     name: "create_task",
-    description: "创建任务。title 必填；reminder_at 为可选提醒时间（ISO8601，如 2026-08-14T09:00:00+08:00），不解析自然语言。",
+    description: "创建任务。title 必填；reminder_at 为可选提醒时间（ISO8601）；priority 可选 high/medium/low，默认 medium；due_at 为可选截止时间（ISO8601）；description 为可选描述。不解析自然语言时间。",
     inputSchema: .object([
         "type": .string("object"),
         "required": .array([.string("title")]),
@@ -67,6 +67,19 @@ private let createTaskTool = ToolDefinition(
             "reminder_at": .object([
                 "type": .string("string"),
                 "description": .string("提醒时间，ISO8601 格式")
+            ]),
+            "priority": .object([
+                "type": .string("string"),
+                "enum": .array([.string("high"), .string("medium"), .string("low")]),
+                "description": .string("优先级：high/medium/low，默认 medium")
+            ]),
+            "due_at": .object([
+                "type": .string("string"),
+                "description": .string("截止时间，ISO8601 格式")
+            ]),
+            "description": .object([
+                "type": .string("string"),
+                "description": .string("描述文本")
             ])
         ])
     ])
@@ -74,8 +87,18 @@ private let createTaskTool = ToolDefinition(
     let object = try argumentsObject(arguments)
     let title = try requireString(object, "title")
     let reminderAt = try optionalDate(object, "reminder_at")
+    let priority = try optionalPriority(object, "priority") ?? .medium
+    let dueAt = try optionalDate(object, "due_at")
+    let description = optionalString(object, "description")
     let store = try makeStore(at: storeURL)
-    guard let item = try store.add(title: title, source: .text, reminderAt: reminderAt) else {
+    guard let item = try store.add(
+        title: title,
+        source: .text,
+        reminderAt: reminderAt,
+        priority: priority,
+        dueAt: dueAt,
+        description: description
+    ) else {
         throw MCPToolError("任务标题不能为空")
     }
     return try jsonValue(TodoItemPayload(item))
@@ -83,7 +106,7 @@ private let createTaskTool = ToolDefinition(
 
 private let updateTaskTool = ToolDefinition(
     name: "update_task",
-    description: "修改任务。title、reminder_at、clear_reminder 至少提供一项；未提供的字段保持不变。",
+    description: "修改任务。title、reminder_at、clear_reminder、priority、due_at、clear_due、description 至少提供一项；未提供的字段保持不变。",
     inputSchema: .object([
         "type": .string("object"),
         "required": .array([.string("id")]),
@@ -103,6 +126,23 @@ private let updateTaskTool = ToolDefinition(
             "clear_reminder": .object([
                 "type": .string("boolean"),
                 "description": .string("为 true 时清除提醒时间")
+            ]),
+            "priority": .object([
+                "type": .string("string"),
+                "enum": .array([.string("high"), .string("medium"), .string("low")]),
+                "description": .string("新优先级：high/medium/low")
+            ]),
+            "due_at": .object([
+                "type": .string("string"),
+                "description": .string("新截止时间，ISO8601 格式")
+            ]),
+            "clear_due": .object([
+                "type": .string("boolean"),
+                "description": .string("为 true 时清除截止时间")
+            ]),
+            "description": .object([
+                "type": .string("string"),
+                "description": .string("新描述文本")
             ])
         ])
     ])
@@ -112,8 +152,12 @@ private let updateTaskTool = ToolDefinition(
     let hasTitle = object["title"] != nil
     let hasReminder = object["reminder_at"] != nil
     let clearReminder = optionalBool(object, "clear_reminder") ?? false
-    guard hasTitle || hasReminder || clearReminder else {
-        throw MCPToolError("update_task 至少需要提供 title、reminder_at 或 clear_reminder 之一")
+    let hasPriority = object["priority"] != nil
+    let hasDue = object["due_at"] != nil
+    let clearDue = optionalBool(object, "clear_due") ?? false
+    let hasDescription = object["description"] != nil
+    guard hasTitle || hasReminder || clearReminder || hasPriority || hasDue || clearDue || hasDescription else {
+        throw MCPToolError("update_task 至少需要提供 title、reminder_at、clear_reminder、priority、due_at、clear_due 或 description 之一")
     }
 
     let store = try makeStore(at: storeURL)
@@ -138,7 +182,32 @@ private let updateTaskTool = ToolDefinition(
         newReminder = nil
     }
 
-    guard let updated = try store.update(id, title: newTitle, reminderAt: newReminder) else {
+    var newPriority = current.priority
+    if let priority = try optionalPriority(object, "priority") {
+        newPriority = priority
+    }
+
+    var newDue = current.dueAt
+    if let raw = optionalString(object, "due_at") {
+        newDue = try parseISO8601(raw)
+    }
+    if clearDue {
+        newDue = nil
+    }
+
+    var newDescription = current.description
+    if let description = optionalString(object, "description") {
+        newDescription = description
+    }
+
+    guard let updated = try store.update(
+        id,
+        title: newTitle,
+        reminderAt: newReminder,
+        priority: newPriority,
+        dueAt: newDue,
+        description: newDescription
+    ) else {
         throw MCPToolError("更新失败")
     }
     return try jsonValue(TodoItemPayload(updated))
@@ -268,9 +337,19 @@ private func optionalDate(_ object: [String: JSONValue], _ key: String) throws -
     return try parseISO8601(raw)
 }
 
+private func optionalPriority(_ object: [String: JSONValue], _ key: String) throws -> Priority? {
+    guard let raw = optionalString(object, key) else {
+        return nil
+    }
+    guard let priority = Priority(rawValue: raw) else {
+        throw MCPToolError("无效的优先级: \(raw)（应为 high/medium/low）")
+    }
+    return priority
+}
+
 private func parseISO8601(_ raw: String) throws -> Date {
     guard let date = isoFormatter.date(from: raw) else {
-        throw MCPToolError("无效的提醒时间: \(raw)（应为 ISO8601，如 2026-08-14T09:00:00+08:00）")
+        throw MCPToolError("无效的日期时间: \(raw)（应为 ISO8601，如 2026-08-14T09:00:00+08:00）")
     }
     return date
 }

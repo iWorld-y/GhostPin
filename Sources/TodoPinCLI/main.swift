@@ -164,7 +164,14 @@ private func runUpdate(_ arguments: [String]) throws {
         newReminder = nil
     }
 
-    guard let updated = try store.update(id, title: newTitle, reminderAt: newReminder) else {
+    guard let updated = try store.update(
+        id,
+        title: newTitle,
+        reminderAt: newReminder,
+        priority: current.priority,
+        dueAt: current.dueAt,
+        description: current.description
+    ) else {
         throw CLIError(message: "更新失败", code: .runtimeError)
     }
     try successOutput(updated)
