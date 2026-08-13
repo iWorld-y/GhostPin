@@ -11,6 +11,7 @@ final class AppState: ObservableObject {
 
     @Published var lastErrorMessage: String?
 
+
     private let notificationService = NotificationService()
     private let hotKeyService = HotKeyService()
     private lazy var reminderService = ReminderService(
@@ -95,6 +96,16 @@ final class AppState: ObservableObject {
 
     func hideBoard() {
         windowCoordinator.hideBoard()
+    }
+
+    func toggleHUDMode() {
+        preferences.hudMode = preferences.hudMode == .interactive ? .passthrough : .interactive
+        windowCoordinator.updateHUD()
+        windowCoordinator.applyHUDInteraction()
+    }
+
+    func updateHUD() {
+        windowCoordinator.updateHUD()
     }
 
     func showSummary() {
@@ -188,8 +199,29 @@ final class AppState: ObservableObject {
         }
     }
 
+    func updateHUDModeHotKey(_ shortcut: HotKeyShortcut) {
+        guard shortcut != preferences.textHotKeyShortcut,
+              shortcut != preferences.voiceHotKeyShortcut else {
+            lastErrorMessage = "HUD 模式切换不能与文本录入或语音录入使用同一个快捷键。"
+            return
+        }
+
+        let previousShortcut = preferences.hudModeHotKeyShortcut
+        preferences.hudModeHotKeyShortcut = shortcut
+
+        do {
+            try registerHotKeys()
+            lastErrorMessage = nil
+        } catch {
+            preferences.hudModeHotKeyShortcut = previousShortcut
+            try? registerHotKeys()
+            report(error)
+        }
+    }
+
     func updateBoardLevel() {
         windowCoordinator.updateBoardLevel()
+        windowCoordinator.updateHUD()
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -221,6 +253,13 @@ final class AppState: ObservableObject {
                     shortcut: preferences.voiceHotKeyShortcut,
                     onTrigger: { [weak self] in
                         self?.startVoiceCapture()
+                    }
+                ),
+                HotKeyRegistration(
+                    id: 3,
+                    shortcut: preferences.hudModeHotKeyShortcut,
+                    onTrigger: { [weak self] in
+                        self?.toggleHUDMode()
                     }
                 )
             ])

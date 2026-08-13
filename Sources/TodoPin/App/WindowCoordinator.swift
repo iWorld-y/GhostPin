@@ -90,21 +90,27 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         }
 
         if boardWindow == nil {
-            let window = NSPanel(
+            let window = HUDPanel(
                 contentRect: NSRect(x: 0, y: 0, width: 360, height: 460),
-                styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+                styleMask: [.borderless, .resizable],
                 backing: .buffered,
                 defer: false
             )
-            window.title = "TodoPin 桌面便签"
             window.isReleasedWhenClosed = false
             window.delegate = self
-            configureFloatingPanel(window, hidesStandardButtons: true)
+            window.isOpaque = false
+            window.backgroundColor = .clear
             window.isMovableByWindowBackground = true
             window.hidesOnDeactivate = false
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             window.minSize = NSSize(width: 300, height: 280)
-            window.center()
+            if let savedFrame = appState.preferences.hudFrame {
+                window.setFrame(savedFrame.nsRect, display: false)
+                if !Self.frameIntersectsAnyScreen(savedFrame.nsRect) {
+                    window.center()
+                }
+            } else {
+                window.center()
+            }
             boardWindow = window
         }
 
@@ -116,7 +122,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
                 }
             )
         )
-        updateBoardLevel()
+        updateHUD()
         boardWindow?.orderFrontRegardless()
     }
 
@@ -131,7 +137,32 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     func updateBoardLevel() {
         quickAddWindow?.level = appState?.preferences.keepBoardOnTop == true ? .floating : .normal
         voiceCaptureWindow?.level = .floating
-        boardWindow?.level = appState?.preferences.keepBoardOnTop == true ? .floating : .normal
+    }
+
+    func updateHUD() {
+        guard let appState, let boardWindow else {
+            return
+        }
+        let interactive = appState.preferences.hudMode == .interactive
+        boardWindow.ignoresMouseEvents = !interactive
+        boardWindow.alphaValue = CGFloat(appState.preferences.hudOpacity)
+        boardWindow.collectionBehavior = appState.preferences.hudAllSpaces
+            ? [.canJoinAllSpaces, .fullScreenAuxiliary]
+            : []
+        boardWindow.level = appState.preferences.keepBoardOnTop == true ? .floating : .normal
+    }
+
+    func applyHUDInteraction() {
+        guard let appState, let boardWindow else {
+            return
+        }
+        if appState.preferences.hudMode == .interactive {
+            NSApp.activate(ignoringOtherApps: true)
+            boardWindow.makeKeyAndOrderFront(nil)
+        } else {
+            boardWindow.resignKey()
+            NSApp.deactivate()
+        }
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -142,6 +173,31 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         } else if notification.object as AnyObject? === boardWindow {
             boardWindow?.contentView = nil
         }
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        saveBoardFrame()
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        saveBoardFrame()
+    }
+
+    private func saveBoardFrame() {
+        guard let boardWindow, let appState else {
+            return
+        }
+        let frame = boardWindow.frame
+        appState.preferences.hudFrame = HudWindowFrame(
+            x: frame.origin.x,
+            y: frame.origin.y,
+            width: frame.size.width,
+            height: frame.size.height
+        )
+    }
+
+    private static func frameIntersectsAnyScreen(_ frame: NSRect) -> Bool {
+        NSScreen.screens.contains { $0.frame.intersects(frame) }
     }
 
     private func configureFloatingPanel(_ window: NSPanel, hidesStandardButtons: Bool) {
@@ -159,4 +215,9 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
     }
+}
+
+private final class HUDPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
 }

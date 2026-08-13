@@ -18,12 +18,12 @@ struct DesktopNotesBoardView: View {
             VStack(alignment: .leading, spacing: 12) {
                 header
 
-                if openItems.isEmpty {
+                if hudItems.isEmpty {
                     emptyState
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 10) {
-                            ForEach(openItems) { item in
+                            ForEach(hudItems) { item in
                                 if editingID == item.id {
                                     DesktopNoteEditorView(
                                         title: $editingTitle,
@@ -60,10 +60,10 @@ struct DesktopNotesBoardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(isActive ? .white.opacity(0.34) : .white.opacity(0.26), lineWidth: 1)
+                .stroke(strokeOpacity, lineWidth: 1)
         )
         .shadow(color: .black.opacity(isActive ? 0.18 : 0.11), radius: isActive ? 22 : 12, y: isActive ? 12 : 6)
-        .opacity(isActive ? 1 : 0.86)
+        .opacity(boardOpacity)
         .saturation(isActive ? 1 : 0.88)
         .blur(radius: isActive ? 0 : 0.08)
         .onHover { hovering in
@@ -71,7 +71,14 @@ struct DesktopNotesBoardView: View {
                 isHovering = hovering
             }
         }
+        .onChange(of: appState.preferences.hudMode) { _, mode in
+            if mode == .passthrough {
+                isHovering = false
+                editingID = nil
+            }
+        }
         .animation(.easeInOut(duration: 0.18), value: isActive)
+        .animation(.easeInOut(duration: 0.18), value: isGhostFading)
     }
 
     private var header: some View {
@@ -81,7 +88,7 @@ struct DesktopNotesBoardView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("TodoPin")
                     .font(.system(size: 16, weight: .semibold))
-                Text("\(openItems.count) 个未完成")
+                Text("\(hudItems.count) 个未完成")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -154,12 +161,37 @@ struct DesktopNotesBoardView: View {
         ]
     }
 
-    private var openItems: [TodoItem] {
-        appState.todoStore.openItems()
+    private var hudItems: [TodoItem] {
+        appState.todoStore.hudItems(
+            scope: appState.preferences.hudScope,
+            maxCount: appState.preferences.hudMaxItems
+        )
+    }
+
+    private var isInteractive: Bool {
+        appState.preferences.hudMode == .interactive
     }
 
     private var isActive: Bool {
-        isHovering || editingID != nil
+        isInteractive || editingID != nil
+    }
+
+    private var isGhostFading: Bool {
+        !isInteractive && isHovering
+    }
+
+    private var boardOpacity: Double {
+        if isGhostFading {
+            return 0.4
+        }
+        return isActive ? 1 : 0.86
+    }
+
+    private var strokeOpacity: Color {
+        if isGhostFading {
+            return .white.opacity(0.10)
+        }
+        return .white.opacity(isActive ? 0.34 : 0.26)
     }
 
     private func startEdit(_ item: TodoItem) {

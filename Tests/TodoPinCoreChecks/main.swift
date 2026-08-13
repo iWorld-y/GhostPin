@@ -30,6 +30,10 @@ let checks: [Check] = [
     ("TodoStore.update changes reminder time and clears sent time", checkUpdateChangesReminderTimeAndClearsSentTime),
     ("TodoStore.update removes reminder time and clears sent time", checkUpdateRemovesReminderTimeAndClearsSentTime),
     ("TodoStore.setCompleted removes items from openItems", checkCompletedItemsAreRemovedFromOpenItems),
+    ("TodoStore.hudItems filters today scope by day boundary", checkHudItemsTodayScopeUsesDayBoundary),
+    ("TodoStore.hudItems all scope includes every open item", checkHudItemsAllScopeIncludesEveryOpenItem),
+    ("TodoStore.hudItems truncates to maxCount keeping newest first", checkHudItemsTruncatesToMaxCount),
+    ("TodoStore.hudItems excludes completed items", checkHudItemsExcludesCompletedItems),
     ("ReminderPolicy does not remind with no open items", checkDoesNotRemindWhenThereAreNoOpenItems),
     ("ReminderPolicy does not immediately remind for new todo", checkDoesNotImmediatelyRemindForNewTodo),
     ("ReminderPolicy reminds after one hour", checkRemindsAfterTodoHasBeenOpenForOneHour),
@@ -296,6 +300,80 @@ func checkMovesElapsedTimeOnlyReminderToTomorrow() throws {
     let now = makeDate(year: 2026, month: 6, day: 14, hour: 10, minute: 0)
     let parsed = try require(timeParser.parse("9点提醒我", now: now), "expected reminder time")
     try check(parsed.date == makeDate(year: 2026, month: 6, day: 15, hour: 9, minute: 0), "elapsed time-only reminder should move to tomorrow")
+}
+
+func checkHudItemsTodayScopeUsesDayBoundary() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    _ = try require(
+        try store.add(title: "今天任务", source: .text, createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 1, minute: 0)),
+        "expected today todo"
+    )
+    _ = try require(
+        try store.add(title: "昨天任务", source: .text, createdAt: makeDate(year: 2026, month: 6, day: 14, hour: 23, minute: 59)),
+        "expected yesterday todo"
+    )
+
+    let hudItems = store.hudItems(scope: .today, maxCount: 10, now: now, calendar: checkCalendar)
+    try check(hudItems.map(\.title) == ["今天任务"], "today scope should only include items created today")
+}
+
+func checkHudItemsAllScopeIncludesEveryOpenItem() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    _ = try require(
+        try store.add(title: "今天任务", source: .text, createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 1, minute: 0)),
+        "expected today todo"
+    )
+    _ = try require(
+        try store.add(title: "昨天任务", source: .text, createdAt: makeDate(year: 2026, month: 6, day: 14, hour: 23, minute: 59)),
+        "expected yesterday todo"
+    )
+
+    let hudItems = store.hudItems(scope: .all, maxCount: 10, now: now, calendar: checkCalendar)
+    try check(hudItems.map(\.title) == ["今天任务", "昨天任务"], "all scope should include every open item")
+}
+
+func checkHudItemsTruncatesToMaxCount() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    for index in 1...5 {
+        _ = try require(
+            try store.add(
+                title: "任务\(index)",
+                source: .text,
+                createdAt: makeDate(year: 2026, month: 6, day: 15, hour: index, minute: 0)
+            ),
+            "expected todo"
+        )
+    }
+
+    let hudItems = store.hudItems(scope: .all, maxCount: 3, now: now, calendar: checkCalendar)
+    try check(hudItems.count == 3, "hudItems should truncate to maxCount")
+    try check(hudItems.map(\.title) == ["任务5", "任务4", "任务3"], "hudItems should keep newest first")
+}
+
+func checkHudItemsExcludesCompletedItems() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let completedItem = try require(try store.add(title: "待完成", source: .text), "expected todo")
+    _ = try require(try store.add(title: "保留", source: .text), "expected todo")
+    try store.setCompleted(completedItem.id, completed: true)
+
+    let hudItems = store.hudItems(scope: .all, maxCount: 10, now: now, calendar: checkCalendar)
+    try check(hudItems.map(\.title) == ["保留"], "completed items should disappear from HUD")
 }
 
 func makeStore(in temporaryDirectory: URL) -> TodoStore {

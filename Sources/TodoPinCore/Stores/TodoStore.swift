@@ -102,6 +102,24 @@ public final class TodoStore: ObservableObject {
         Self.sortByCreatedAtDescending(items.filter { !$0.isCompleted })
     }
 
+    public func hudItems(
+        scope: HudScope,
+        maxCount: Int,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [TodoItem] {
+        let open = openItems()
+        let scoped: [TodoItem]
+        switch scope {
+        case .all:
+            scoped = open
+        case .today:
+            let dayStart = calendar.todoPinDayStart(for: now)
+            scoped = open.filter { $0.createdAt >= dayStart }
+        }
+        return Array(scoped.prefix(max(maxCount, 0)))
+    }
+
     public func completedItems(on date: Date, calendar: Calendar = .current) -> [TodoItem] {
         let start = calendar.todoPinDayStart(for: date)
         let end = calendar.todoPinDayEnd(for: date)
