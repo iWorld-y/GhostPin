@@ -52,6 +52,6 @@ git push origin "$TAG"
 gh release create "$TAG" "$DMG_PATH" \
   --repo iWorld-y/TodoPin \
   --title "TodoPin $VERSION" \
-  --notes "Agent native 版 $VERSION。任务操作走 MCP,App 仅负责展示与通知。"
+  --notes "Agent native 版 ${VERSION}。任务操作走 MCP,App 仅负责展示与通知。"
 
 echo ">>> 发布完成: https://github.com/iWorld-y/TodoPin/releases/tag/$TAG"
