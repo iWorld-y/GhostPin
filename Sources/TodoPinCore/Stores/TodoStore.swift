@@ -24,10 +24,16 @@ public final class TodoStore: ObservableObject {
 
     public func load() throws {
         do {
-            items = try JSONFile.load([TodoItem].self, from: fileURL, fileManager: fileManager)
-            items = Self.sortByCreatedAtDescending(items)
+            let loaded = Self.sortByCreatedAtDescending(
+                try JSONFile.load([TodoItem].self, from: fileURL, fileManager: fileManager)
+            )
+            if try JSONFile.canonicalData(loaded) != JSONFile.canonicalData(items) {
+                items = loaded
+            }
         } catch CocoaError.fileNoSuchFile {
-            items = []
+            if !items.isEmpty {
+                items = []
+            }
         }
     }
 

@@ -27,6 +27,15 @@ public enum JSONFile {
     }
 }
 
+extension JSONFile {
+    public static func canonicalData<T: Encodable>(_ value: T) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(value)
+    }
+}
+
 extension JSONEncoder {
     public static var todoPin: JSONEncoder {
         let encoder = JSONEncoder()

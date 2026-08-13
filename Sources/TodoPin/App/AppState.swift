@@ -12,6 +12,8 @@ final class AppState: ObservableObject {
     @Published var lastErrorMessage: String?
 
 
+    private let todosURL: URL
+    private var todoFileWatcher: TodoFileWatcher?
     private let notificationService = NotificationService()
     private let hotKeyService = HotKeyService()
     private lazy var reminderService = ReminderService(
@@ -29,12 +31,12 @@ final class AppState: ObservableObject {
         let fallbackDirectory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("TodoPin", isDirectory: true)
 
-        let todosURL = (try? StorageLocations.todosURL(fileManager: fileManager))
+        self.todosURL = (try? StorageLocations.todosURL(fileManager: fileManager))
             ?? fallbackDirectory.appendingPathComponent("todos.json")
         let summariesURL = (try? StorageLocations.summariesURL(fileManager: fileManager))
             ?? fallbackDirectory.appendingPathComponent("summaries.json")
 
-        self.todoStore = TodoStore(fileURL: todosURL, fileManager: fileManager)
+        self.todoStore = TodoStore(fileURL: self.todosURL, fileManager: fileManager)
         self.summaryStore = SummaryStore(fileURL: summariesURL, fileManager: fileManager)
         self.preferences = AppPreferences()
         self.speechModelManager = SpeechModelManager()
@@ -74,11 +76,18 @@ final class AppState: ObservableObject {
         }
         reminderService.start()
         windowCoordinator.showBoard()
+
+        let watcher = TodoFileWatcher(directoryURL: todosURL.deletingLastPathComponent()) { [weak self] in
+            self?.reloadTodosFromDisk()
+        }
+        todoFileWatcher = watcher
+        watcher.start()
     }
 
     func stop() {
         hotKeyService.unregister()
         reminderService.stop()
+        todoFileWatcher?.stop()
     }
 
     func showQuickAdd() {
@@ -230,6 +239,14 @@ final class AppState: ObservableObject {
             preferences.launchAtLogin = enabled
         } catch {
             preferences.launchAtLogin = false
+            report(error)
+        }
+    }
+
+    private func reloadTodosFromDisk() {
+        do {
+            try todoStore.load()
+        } catch {
             report(error)
         }
     }

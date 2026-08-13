@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import TodoPinCore
 
@@ -34,6 +35,9 @@ let checks: [Check] = [
     ("TodoStore.hudItems all scope includes every open item", checkHudItemsAllScopeIncludesEveryOpenItem),
     ("TodoStore.hudItems truncates to maxCount keeping newest first", checkHudItemsTruncatesToMaxCount),
     ("TodoStore.hudItems excludes completed items", checkHudItemsExcludesCompletedItems),
+    ("TodoStore.load reflects external file changes", checkLoadReflectsExternalChange),
+    ("TodoStore.load skips publish when content unchanged", checkLoadSkipsPublishWhenUnchanged),
+    ("TodoStore.load clears items when file missing", checkLoadClearsItemsWhenFileMissing),
     ("ReminderPolicy does not remind with no open items", checkDoesNotRemindWhenThereAreNoOpenItems),
     ("ReminderPolicy does not immediately remind for new todo", checkDoesNotImmediatelyRemindForNewTodo),
     ("ReminderPolicy reminds after one hour", checkRemindsAfterTodoHasBeenOpenForOneHour),
@@ -374,6 +378,47 @@ func checkHudItemsExcludesCompletedItems() throws {
 
     let hudItems = store.hudItems(scope: .all, maxCount: 10, now: now, calendar: checkCalendar)
     try check(hudItems.map(\.title) == ["保留"], "completed items should disappear from HUD")
+}
+
+func checkLoadReflectsExternalChange() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    _ = try require(try store.add(title: "初始任务", source: .text), "expected todo")
+
+    let external = makeStore(in: temporaryDirectory)
+    try external.load()
+    _ = try require(try external.add(title: "外部任务", source: .text), "expected external todo")
+
+    try store.load()
+    try check(store.items.map(\.title) == ["外部任务", "初始任务"], "load should reflect external change")
+}
+
+func checkLoadSkipsPublishWhenUnchanged() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    _ = try require(try store.add(title: "任务", source: .text), "expected todo")
+
+    var publishCount = 0
+    let cancellable = store.objectWillChange.sink { publishCount += 1 }
+
+    try store.load()
+    try check(publishCount == 0, "load with unchanged content should not publish")
+    try check(store.items.map(\.title) == ["任务"], "items should stay intact")
+    withExtendedLifetime(cancellable) {}
+}
+
+func checkLoadClearsItemsWhenFileMissing() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    _ = try require(try store.add(title: "任务", source: .text), "expected todo")
+
+    try FileManager.default.removeItem(at: temporaryDirectory.appendingPathComponent("todos.json"))
+
+    try store.load()
+    try check(store.items.isEmpty, "load should clear items when file missing")
 }
 
 func makeStore(in temporaryDirectory: URL) -> TodoStore {

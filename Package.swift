@@ -8,6 +8,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "TodoPin", targets: ["TodoPin"]),
+        .executable(name: "todopin-cli", targets: ["TodoPinCLI"]),
         .executable(name: "TodoPinCoreChecks", targets: ["TodoPinCoreChecks"])
     ],
     targets: [
@@ -34,6 +35,11 @@ let package = Package(
             name: "TodoPinCoreChecks",
             dependencies: ["TodoPinCore"],
             path: "Tests/TodoPinCoreChecks"
+        ),
+        .executableTarget(
+            name: "TodoPinCLI",
+            dependencies: ["TodoPinCore"],
+            path: "Sources/TodoPinCLI"
         ),
         .binaryTarget(
             name: "WhisperFramework",
