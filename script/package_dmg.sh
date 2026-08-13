@@ -4,9 +4,11 @@ set -euo pipefail
 APP_NAME="TodoPin"
 BUNDLE_ID="com.oyuxi.TodoPin"
 MIN_SYSTEM_VERSION="14.0"
-DMG_NAME="${APP_NAME}.dmg"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VERSION="${TODO_PIN_VERSION:-$(cat "$ROOT_DIR/script/VERSION" 2>/dev/null | tr -d '[:space:]' || true)}"
+VERSION="${VERSION:-0.0.1}"
+DMG_NAME="${APP_NAME}-${VERSION}.dmg"
 DIST_DIR="$ROOT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
@@ -50,9 +52,9 @@ cat >"$INFO_PLIST" <<PLIST
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.0</string>
+  <string>$VERSION</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>$VERSION</string>
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_SYSTEM_VERSION</string>
   <key>LSUIElement</key>
