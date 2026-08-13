@@ -2,12 +2,12 @@
 
 ## 项目概述
 
-TodoPin 是一个本地优先的 macOS 菜单栏待办应用（SwiftUI + Swift Package Manager），支持文本快速录入、可选本地语音识别（whisper.cpp）、桌面幽灵 HUD（无边框置顶、默认鼠标点击穿透）与本地通知，并提供 `todopin-cli` 命令行工具与 MCP Server 供 Agent 程序化管理任务。纯本地存储，无云同步。最低支持 macOS 14，工具链为 Swift 6（包声明 `swiftLanguageModes: [.v5]`）。
+TodoPin 是一个本地优先的 macOS 菜单栏待办应用（SwiftUI + Swift Package Manager），支持文本快速录入、桌面幽灵 HUD（无边框置顶、默认鼠标点击穿透）与本地通知，并提供 `todopin-cli` 命令行工具与 MCP Server 供 Agent 程序化管理任务。纯本地存储，无云同步。最低支持 macOS 14，工具链为 Swift 6（包声明 `swiftLanguageModes: [.v5]`）。
 
 ## 架构边界（易错点）
 
 - `Sources/TodoPinCore/`：纯业务逻辑层（Model、TodoStore、ReminderPolicy、TodoTimeParser、JSON 存储），**不得 import AppKit/SwiftUI**，保证可被测试目标独立编译运行。
-- `Sources/TodoPin/`：应用层（AppDelegate、窗口管理、全局快捷键、通知、语音录制、文件监听），`@main` 入口在 `App/TodoPinApp.swift`。
+- `Sources/TodoPin/`：应用层（AppDelegate、窗口管理、全局快捷键、通知、文件监听），`@main` 入口在 `App/TodoPinApp.swift`。
 - `Sources/TodoPinMCP/`：MCP 服务器协议与工具实现（纯 Foundation 库，不 import AppKit/SwiftUI，可被测试目标 import）。
 - `Sources/TodoPinCLI/`：`todopin-cli` 可执行工具（参数解析、输出格式化），依赖 TodoPinCore 与 TodoPinMCP。
 - `Tests/TodoPinCoreChecks/`：可执行测试目标，**不是 XCTest**（详见下节）。
@@ -21,8 +21,7 @@ swift run TodoPinCoreChecks        # 运行核心行为检查（测试）
 ./script/build_and_run.sh          # 打包 .app 并运行（run 默认）
 ./script/build_and_run.sh --verify # 打包并验证进程可启动（CI 式验证）
 ./script/build_and_run.sh --logs   # 运行并跟踪统一日志（--telemetry 按 subsystem 过滤）
-./script/package_dmg.sh            # 打包 DMG；TODO_PIN_INCLUDE_MODEL=1 捆绑语音模型
-./script/fetch_models.sh           # 下载语音模型到 Sources/TodoPin/Resources/Models/
+./script/package_dmg.sh            # 打包 DMG
 swift run todopin-cli list --json   # CLI 查询任务（add/done/undone/update/delete 同理）
 swift run todopin-cli mcp           # 以 MCP stdio 服务器模式运行（供 OpenCode 等 Agent）
 ```
@@ -35,10 +34,8 @@ swift run todopin-cli mcp           # 以 MCP stdio 服务器模式运行（供 
 
 ## 数据与依赖
 
-- 数据存于 `~/Library/Application Support/TodoPin/`（`todos.json`、`summaries.json`），偏好存 UserDefaults。路径定义在 `Sources/TodoPinCore/Support/StorageLocations.swift`。
-- 语音模型 `ggml-base-q5_1.bin` 被 gitignore，需 `./script/fetch_models.sh` 下载（SHA-256 校验）；模型缺失时应用仍可手动输入。
-- `WhisperFramework` 是远程 binaryTarget（whisper.cpp 预编译 XCFramework），首次构建需要网络；不要修改其 checksum。
-- 全局快捷键（Carbon 注册）：文本快速录入 `Option + Space`、语音 `F8`、HUD 穿透/交互切换 `⌥⌘T`，三者两两不可相同，App 层会校验。
+- 数据存于 `~/Library/Application Support/TodoPin/`（`todos.json`），偏好存 UserDefaults。路径定义在 `Sources/TodoPinCore/Support/StorageLocations.swift`。
+- 全局快捷键（Carbon 注册）：文本快速录入 `Option + Space`、HUD 穿透/交互切换 `⌥⌘T`，两者不可相同，App 层会校验。
 
 ## 变更流程
 

@@ -37,18 +37,4 @@ final class NotificationService {
         )
         UNUserNotificationCenter.current().add(request)
     }
-
-    func sendSummary(_ summary: DailySummary) {
-        let content = UNMutableNotificationContent()
-        content.title = "TodoPin 今日总结"
-        content.body = "新增 \(summary.addedCount)，完成 \(summary.completedCount)，继续保留 \(summary.carriedOpenCount)。"
-        content.sound = nil
-
-        let request = UNNotificationRequest(
-            identifier: "todopin.summary.\(summary.dayStart.timeIntervalSince1970)",
-            content: content,
-            trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request)
-    }
 }

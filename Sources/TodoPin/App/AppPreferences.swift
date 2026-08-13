@@ -22,16 +22,8 @@ final class AppPreferences: ObservableObject {
         didSet { saveTextHotKeyShortcut() }
     }
 
-    @Published var voiceHotKeyShortcut: HotKeyShortcut {
-        didSet { saveVoiceHotKeyShortcut() }
-    }
-
     @Published var reminderSettings: ReminderSettings {
         didSet { saveReminderSettings() }
-    }
-
-    @Published var speechLanguage: String {
-        didSet { defaults.set(speechLanguage, forKey: Keys.speechLanguage) }
     }
 
     @Published var keepBoardOnTop: Bool {
@@ -89,20 +81,8 @@ final class AppPreferences: ObservableObject {
             loadedTextHotKeyShortcut = .defaultTextShortcut
         }
 
-        let loadedVoiceHotKeyShortcut: HotKeyShortcut
-        if let data = defaults.data(forKey: Keys.voiceHotKeyShortcut),
-           let decoded = try? JSONDecoder.todoPin.decode(HotKeyShortcut.self, from: data) {
-            loadedVoiceHotKeyShortcut = decoded
-        } else {
-            loadedVoiceHotKeyShortcut = .defaultVoiceShortcut
-        }
-
         self.textHotKeyShortcut = loadedTextHotKeyShortcut
-        self.voiceHotKeyShortcut = loadedVoiceHotKeyShortcut == loadedTextHotKeyShortcut
-            ? (loadedTextHotKeyShortcut == .defaultVoiceShortcut ? .optionN : .defaultVoiceShortcut)
-            : loadedVoiceHotKeyShortcut
 
-        self.speechLanguage = defaults.string(forKey: Keys.speechLanguage) ?? "zh"
         self.keepBoardOnTop = defaults.object(forKey: Keys.keepBoardOnTop) == nil ? true : defaults.bool(forKey: Keys.keepBoardOnTop)
         self.launchAtLogin = defaults.bool(forKey: Keys.launchAtLogin)
 
@@ -120,19 +100,17 @@ final class AppPreferences: ObservableObject {
         }
 
         let hudModeFallback: HotKeyShortcut
-        if HotKeyShortcut.optionCommandT != loadedTextHotKeyShortcut,
-           HotKeyShortcut.optionCommandT != loadedVoiceHotKeyShortcut {
+        if HotKeyShortcut.optionCommandT != loadedTextHotKeyShortcut {
             hudModeFallback = .optionCommandT
         } else {
             hudModeFallback = HotKeyShortcut.presets.first {
-                $0 != loadedTextHotKeyShortcut && $0 != loadedVoiceHotKeyShortcut
+                $0 != loadedTextHotKeyShortcut
             } ?? .optionCommandT
         }
 
         if let data = defaults.data(forKey: Keys.hudModeHotKeyShortcut),
            let decoded = try? JSONDecoder.todoPin.decode(HotKeyShortcut.self, from: data),
-           decoded != loadedTextHotKeyShortcut,
-           decoded != loadedVoiceHotKeyShortcut {
+           decoded != loadedTextHotKeyShortcut {
             self.hudModeHotKeyShortcut = decoded
         } else {
             self.hudModeHotKeyShortcut = hudModeFallback
@@ -151,13 +129,6 @@ final class AppPreferences: ObservableObject {
             return
         }
         defaults.set(data, forKey: Keys.textHotKeyShortcut)
-    }
-
-    private func saveVoiceHotKeyShortcut() {
-        guard let data = try? JSONEncoder.todoPin.encode(voiceHotKeyShortcut) else {
-            return
-        }
-        defaults.set(data, forKey: Keys.voiceHotKeyShortcut)
     }
 
     private func saveReminderSettings() {
@@ -193,11 +164,9 @@ final class AppPreferences: ObservableObject {
 
     private enum Keys {
         static let textHotKeyShortcut = "textHotKeyShortcut"
-        static let voiceHotKeyShortcut = "voiceHotKeyShortcut"
         static let hotKeyShortcut = "hotKeyShortcut"
         static let hotKeyPreset = "hotKeyPreset"
         static let reminderSettings = "reminderSettings"
-        static let speechLanguage = "speechLanguage"
         static let keepBoardOnTop = "keepBoardOnTop"
         static let launchAtLogin = "launchAtLogin"
         static let hudMode = "hudMode"

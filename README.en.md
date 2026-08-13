@@ -6,16 +6,15 @@
 
 **English** · [中文](README.md)
 
-TodoPin is a local-first macOS menu bar todo app for quickly capturing tasks with text or optional local voice transcription. It shows a ghost HUD on the desktop with click-through by default, parses reminder times from todo text, and reminds you until a task is completed. Tasks can also be managed programmatically via the `todopin-cli` command line tool or an MCP server.
+TodoPin is a local-first macOS menu bar todo app for quickly capturing tasks with text. It shows a ghost HUD on the desktop with click-through by default, parses reminder times from todo text, and reminds you until a task is completed. Tasks can also be managed programmatically via the `todopin-cli` command line tool or an MCP server.
 
-The app is designed for private, single-user, local workflows. Todos are stored on your Mac as JSON files. Voice transcription can run locally with a small whisper.cpp model, and manual input works without installing any speech model.
+The app is designed for private, single-user, local workflows. Todos are stored on your Mac as JSON files.
 
 ## Features
 
 - Menu bar todo panel for quick capture and task management.
 - Desktop ghost HUD: borderless, always on top, adjustable opacity, mouse click-through by default; press `⌥⌘T` to toggle pass-through/interactive mode. Window position, size, opacity, mode, and display scope persist across restarts.
 - Text quick-add with Chinese reminder time parsing (e.g. "tomorrow 9am").
-- Optional local voice capture powered by whisper.cpp.
 - Editable todo title and reminder time.
 - Completion, deletion, and hourly reminder behavior for unfinished items.
 - Local macOS notifications.
@@ -29,11 +28,9 @@ The app is designed for private, single-user, local workflows. Todos are stored 
 TodoPin is local-first by design.
 
 - Todos are saved locally in `~/Library/Application Support/TodoPin/todos.json`.
-- Daily summary data is saved locally in `~/Library/Application Support/TodoPin/summaries.json`.
 - Preferences are saved with macOS `UserDefaults`.
-- Audio is captured and transcribed on the local machine.
-- The app does not upload todos or audio for recognition.
-- The app only uses network access when you explicitly download the optional speech model from Settings, or when building dependencies from source.
+- The app does not upload todos.
+- The app only uses network access when building dependencies from source.
 
 ## Installation
 
@@ -44,36 +41,9 @@ The current public build is ad-hoc signed. macOS Gatekeeper may show an unidenti
 ## Default Shortcuts
 
 - Text quick-add: `Option + Space`
-- Voice capture: `F8`
 - HUD pass-through / interactive toggle: `Option + Command + T`
 
-Shortcuts can be changed in Settings. Text quick-add opens a compact input panel. Voice capture shows only a small desktop recording overlay and saves the transcribed todo automatically.
-
-## Voice Model
-
-Voice input is optional. TodoPin uses whisper.cpp with the default model:
-
-- `ggml-base-q5_1.bin`
-- SHA-256: `422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898`
-
-Model files are intentionally not committed to git.
-
-You can install the model in either way:
-
-1. Open TodoPin Settings and click the model download button.
-2. Or run:
-
-```bash
-./script/fetch_models.sh
-```
-
-When downloaded by the app, the model is stored under:
-
-```text
-~/Library/Application Support/TodoPin/Models/ggml-base-q5_1.bin
-```
-
-Manual todo input works even when no voice model is installed.
+Shortcuts can be changed in Settings. Text quick-add opens a compact input panel.
 
 ## Command Line Tool
 
@@ -143,14 +113,6 @@ Create a release DMG:
 ./script/package_dmg.sh
 ```
 
-By default, the release DMG does not bundle the speech model. Users can download it later from Settings.
-
-To bundle the model into a local build:
-
-```bash
-TODO_PIN_INCLUDE_MODEL=1 ./script/package_dmg.sh
-```
-
 ## Signing And Distribution
 
 The packaging script supports ad-hoc signing by default.
@@ -170,9 +132,9 @@ Sources/TodoPin/             macOS SwiftUI app
 Sources/TodoPinCore/         local todo, reminder, parser, and storage logic
 Sources/TodoPinCLI/          todopin-cli command line tool
 Sources/TodoPinMCP/          MCP server protocol and tool implementations
-Sources/TodoPin/Resources/   app icon, logo, and optional model folder
+Sources/TodoPin/Resources/   app icon and logo
 Tests/TodoPinCoreChecks/     executable core behavior checks
-script/                      model download, app bundle, and DMG packaging scripts
+script/                      app bundle and DMG packaging scripts
 ```
 
 ## License

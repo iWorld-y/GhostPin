@@ -20,9 +20,4 @@ public enum StorageLocations {
         try applicationSupportDirectory(fileManager: fileManager)
             .appendingPathComponent("todos.json")
     }
-
-    public static func summariesURL(fileManager: FileManager = .default) throws -> URL {
-        try applicationSupportDirectory(fileManager: fileManager)
-            .appendingPathComponent("summaries.json")
-    }
 }

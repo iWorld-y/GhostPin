@@ -17,13 +17,11 @@ public struct HotKeyShortcut: Codable, Equatable, Identifiable, Sendable {
 
     public static let optionSpace = HotKeyShortcut(keyCode: 49, modifiers: 2_048, displayName: "Option + Space")
     public static let optionN = HotKeyShortcut(keyCode: 45, modifiers: 2_048, displayName: "Option + N")
-    public static let f8 = HotKeyShortcut(keyCode: 100, modifiers: 0, displayName: "F8")
     public static let optionCommandT = HotKeyShortcut(keyCode: 17, modifiers: 2_304, displayName: "Option + Command + T")
 
     public static let defaultShortcut = optionSpace
     public static let defaultTextShortcut = optionSpace
-    public static let defaultVoiceShortcut = f8
-    public static let presets = [optionSpace, optionN, f8, optionCommandT]
+    public static let presets = [optionSpace, optionN, optionCommandT]
 
     public static func legacyPreset(rawValue: String) -> HotKeyShortcut? {
         switch rawValue {
@@ -31,8 +29,6 @@ public struct HotKeyShortcut: Codable, Equatable, Identifiable, Sendable {
             return .optionSpace
         case "optionN":
             return .optionN
-        case "f8":
-            return .f8
         default:
             return nil
         }

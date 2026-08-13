@@ -20,10 +20,6 @@ DMG_PATH="$DIST_DIR/$DMG_NAME"
 
 cd "$ROOT_DIR"
 
-if [[ "${TODO_PIN_INCLUDE_MODEL:-0}" == "1" ]]; then
-  "$ROOT_DIR/script/fetch_models.sh"
-fi
-
 swift build -c release
 BUILD_DIR="$(swift build -c release --show-bin-path)"
 BUILD_BINARY="$BUILD_DIR/$APP_NAME"
@@ -34,17 +30,8 @@ mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
 
-if [[ -d "$BUILD_DIR/whisper.framework" ]]; then
-  cp -R "$BUILD_DIR/whisper.framework" "$APP_FRAMEWORKS/"
-  install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_BINARY" >/dev/null 2>&1 || true
-fi
-
 if [[ -d "$ROOT_DIR/Sources/TodoPin/Resources" ]]; then
-  RSYNC_ARGS=(-a --exclude 'Models/README.md')
-  if [[ "${TODO_PIN_INCLUDE_MODEL:-0}" != "1" ]]; then
-    RSYNC_ARGS+=(--exclude 'Models/*.bin')
-  fi
-  rsync "${RSYNC_ARGS[@]}" "$ROOT_DIR/Sources/TodoPin/Resources/" "$APP_RESOURCES/"
+  rsync -a --exclude 'Models/README.md' "$ROOT_DIR/Sources/TodoPin/Resources/" "$APP_RESOURCES/"
 fi
 
 cat >"$INFO_PLIST" <<PLIST
@@ -72,8 +59,6 @@ cat >"$INFO_PLIST" <<PLIST
   <true/>
   <key>NSHighResolutionCapable</key>
   <true/>
-  <key>NSMicrophoneUsageDescription</key>
-  <string>TodoPin uses the microphone only to turn your short to-do voice notes into local text.</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
 </dict>
@@ -105,7 +90,4 @@ rm -rf "$DMG_STAGING"
 echo "Created $DMG_PATH"
 if [[ -z "${TODO_PIN_SIGN_IDENTITY:-}" ]]; then
   echo "Signed ad-hoc. For public distribution, set TODO_PIN_SIGN_IDENTITY to a Developer ID Application identity and notarize the DMG."
-fi
-if [[ "${TODO_PIN_INCLUDE_MODEL:-0}" != "1" ]]; then
-  echo "Voice model is not bundled. Users can download it from TodoPin settings when they want voice input."
 fi

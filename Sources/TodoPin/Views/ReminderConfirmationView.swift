@@ -3,7 +3,6 @@ import TodoPinCore
 
 struct PendingReminderDraft: Equatable {
     let title: String
-    let source: TodoSource
     let parsedReminder: ParsedReminderTime
 }
 

@@ -3,7 +3,6 @@ import TodoPinCore
 
 final class ReminderService {
     private let todoStore: TodoStore
-    private let summaryStore: SummaryStore
     private let preferences: AppPreferences
     private let notificationService: NotificationService
     private let policy = ReminderPolicy()
@@ -12,12 +11,10 @@ final class ReminderService {
 
     init(
         todoStore: TodoStore,
-        summaryStore: SummaryStore,
         preferences: AppPreferences,
         notificationService: NotificationService
     ) {
         self.todoStore = todoStore
-        self.summaryStore = summaryStore
         self.preferences = preferences
         self.notificationService = notificationService
     }
@@ -75,21 +72,6 @@ final class ReminderService {
         ) {
             notificationService.sendHourlyReminder(openItems: hourlyItems)
             lastReminderAt = now
-        }
-
-        do {
-            try summaryStore.generateMissingSummaries(upTo: now, todos: todoStore.items)
-            let lastSummaryDay = summaryStore.summary(for: now)?.dayStart
-            if policy.shouldGenerateDailySummary(
-                now: now,
-                lastSummaryDay: lastSummaryDay,
-                settings: preferences.reminderSettings
-            ) {
-                let summary = try summaryStore.generateSummary(for: now, todos: todoStore.items, generatedAt: now)
-                notificationService.sendSummary(summary)
-            }
-        } catch {
-            // Runtime reminders should never interrupt adding todos.
         }
     }
 }

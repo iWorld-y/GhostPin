@@ -103,7 +103,7 @@ private func runAdd(_ arguments: [String]) throws {
     }
 
     let store = try makeStore()
-    guard let item = try store.add(title: title, source: .text, reminderAt: reminderAt) else {
+    guard let item = try store.add(title: title, reminderAt: reminderAt) else {
         throw CLIError(message: "任务标题不能为空", code: .usageError)
     }
     try successOutput(item)

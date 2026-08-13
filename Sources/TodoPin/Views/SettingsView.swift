@@ -18,53 +18,13 @@ struct SettingsView: View {
                     target: .text
                 )
 
-                shortcutRow(
-                    title: "语音录入快捷键",
-                    shortcut: appState.preferences.voiceHotKeyShortcut,
-                    target: .voice
-                )
-
                 if let shortcutMessage {
                     Text(shortcutMessage)
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
 
-                TextField("语音语言", text: speechLanguageBinding)
-                    .textFieldStyle(.roundedBorder)
-
-                Text("文本快捷键打开输入窗；语音快捷键只显示桌面录音动画，转写成功后自动保存。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("本地语音模型") {
-                HStack {
-                    Text("状态")
-                    Spacer()
-                    Text(appState.speechModelManager.status.label)
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack {
-                    Button(modelButtonTitle) {
-                        appState.speechModelManager.downloadModel()
-                    }
-                    .disabled(appState.speechModelManager.status.isDownloading || appState.speechModelManager.status.isInstalled)
-
-                    if appState.speechModelManager.status.isDownloading {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                }
-
-                if case .failed(let message) = appState.speechModelManager.status {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-
-                Text("模型只下载到本机，用于离线语音转文字。")
+                Text("文本快捷键打开输入窗，自动解析中文提醒时间。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -139,26 +99,6 @@ struct SettingsView: View {
                 }
             }
             .controlSize(.small)
-        }
-    }
-
-    private var speechLanguageBinding: Binding<String> {
-        Binding(
-            get: { appState.preferences.speechLanguage },
-            set: { appState.preferences.speechLanguage = $0 }
-        )
-    }
-
-    private var modelButtonTitle: String {
-        switch appState.speechModelManager.status {
-        case .installed:
-            return "已下载"
-        case .downloading:
-            return "下载中"
-        case .failed:
-            return "重新下载模型"
-        case .missing:
-            return "下载语音模型"
         }
     }
 
@@ -248,21 +188,10 @@ struct SettingsView: View {
     private func applyShortcut(_ shortcut: HotKeyShortcut, to target: ShortcutTarget) {
         switch target {
         case .text:
-            guard shortcut != appState.preferences.voiceHotKeyShortcut else {
-                shortcutMessage = "文本录入和语音录入不能使用同一个快捷键。"
-                return
-            }
             appState.updateTextHotKey(shortcut)
-        case .voice:
-            guard shortcut != appState.preferences.textHotKeyShortcut else {
-                shortcutMessage = "文本录入和语音录入不能使用同一个快捷键。"
-                return
-            }
-            appState.updateVoiceHotKey(shortcut)
         case .hudMode:
-            guard shortcut != appState.preferences.textHotKeyShortcut,
-                  shortcut != appState.preferences.voiceHotKeyShortcut else {
-                shortcutMessage = "HUD 模式切换不能与文本录入或语音录入使用同一个快捷键。"
+            guard shortcut != appState.preferences.textHotKeyShortcut else {
+                shortcutMessage = "HUD 模式切换不能与文本录入使用同一个快捷键。"
                 return
             }
             appState.updateHUDModeHotKey(shortcut)
@@ -383,7 +312,6 @@ struct SettingsView: View {
 
     private enum ShortcutTarget: Equatable {
         case text
-        case voice
         case hudMode
     }
 }

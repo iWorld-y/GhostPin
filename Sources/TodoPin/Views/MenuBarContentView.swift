@@ -44,13 +44,6 @@ struct MenuBarContentView: View {
             Spacer()
 
             Button {
-                appState.startVoiceCapture()
-            } label: {
-                Image(systemName: "mic.circle")
-            }
-            .help("桌面语音录入")
-
-            Button {
                 appState.showBoard()
             } label: {
                 Image(systemName: "note.text")
@@ -75,13 +68,6 @@ struct MenuBarContentView: View {
             }
             .keyboardShortcut(.return, modifiers: .command)
             .disabled(draftTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-            Button {
-                appState.startVoiceCapture()
-            } label: {
-                Image(systemName: "mic.fill")
-            }
-            .help("桌面语音录入")
         }
     }
 
@@ -197,9 +183,6 @@ struct MenuBarContentView: View {
                     Text(item.title)
                         .font(.body)
                         .lineLimit(3)
-                    Text(item.source == .voice ? "语音录入" : "手动录入")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                     if let reminderAt = item.reminderAt {
                         Text("提醒：\(ReminderConfirmationView.formatter.string(from: reminderAt))")
                             .font(.caption2)
@@ -227,11 +210,11 @@ struct MenuBarContentView: View {
     }
 
     private func addDraft() {
-        addTodoOrConfirmReminder(title: draftTitle, source: .text)
+        addTodoOrConfirmReminder(title: draftTitle)
         draftTitle = ""
     }
 
-    private func addTodoOrConfirmReminder(title: String, source: TodoSource) {
+    private func addTodoOrConfirmReminder(title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return
@@ -240,11 +223,10 @@ struct MenuBarContentView: View {
         if let parsedReminder = timeParser.parse(trimmed) {
             pendingReminderDraft = PendingReminderDraft(
                 title: trimmed,
-                source: source,
                 parsedReminder: parsedReminder
             )
         } else {
-            appState.addTodo(title: trimmed, source: source)
+            appState.addTodo(title: trimmed)
         }
     }
 
@@ -254,7 +236,6 @@ struct MenuBarContentView: View {
         }
         appState.addTodo(
             title: pendingReminderDraft.title,
-            source: pendingReminderDraft.source,
             reminderAt: pendingReminderDraft.parsedReminder.date
         )
         self.pendingReminderDraft = nil
@@ -264,7 +245,7 @@ struct MenuBarContentView: View {
         guard let pendingReminderDraft else {
             return
         }
-        appState.addTodo(title: pendingReminderDraft.title, source: pendingReminderDraft.source)
+        appState.addTodo(title: pendingReminderDraft.title)
         self.pendingReminderDraft = nil
     }
 

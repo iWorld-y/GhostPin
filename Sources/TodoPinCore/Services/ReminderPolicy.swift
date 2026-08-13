@@ -45,25 +45,4 @@ public struct ReminderPolicy: Sendable {
         }
         return now.timeIntervalSince(lastReminderAt) >= settings.reminderInterval
     }
-
-    public func shouldGenerateDailySummary(
-        now: Date,
-        lastSummaryDay: Date?,
-        settings: ReminderSettings = ReminderSettings(),
-        calendar: Calendar = .current
-    ) -> Bool {
-        let components = calendar.dateComponents([.hour, .minute], from: now)
-        guard let hour = components.hour, let minute = components.minute else {
-            return false
-        }
-        guard hour > settings.summaryHour || (hour == settings.summaryHour && minute >= settings.summaryMinute) else {
-            return false
-        }
-
-        let todayStart = calendar.todoPinDayStart(for: now)
-        if let lastSummaryDay {
-            return !calendar.isDate(lastSummaryDay, inSameDayAs: todayStart)
-        }
-        return true
-    }
 }
