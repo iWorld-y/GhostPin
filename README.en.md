@@ -13,16 +13,16 @@ TodoPin is an **Agent-native**, local-first macOS menu bar todo app (SwiftUI + S
 TodoPin is a **task panel for agents**. All write operations converge on the MCP server; the app is a pure display shell.
 
 ```
-Agent (OpenCode / Codex / you) ──create/update/complete──▶  MCP Server
-                                                              │ read/write
-                                                              ▼
-                                                        todos.json
-                                                              │ file watching (sub-second)
-                                              ┌───────────────┼──────────────┐
-                                         ┌────▼────┐    ┌─────▼────┐   ┌─────▼────┐
-                                         │ Ghost HUD │    │ Notifications│  │ Menu Bar  │
-                                         │ (display) │    │ (timed)   │   │ (toggle/quit)│
-                                         └─────────┘    └──────────┘   └──────────┘
+User ──natural language──▶  Agent ──create/update/complete──▶  MCP Server
+                                                                  │ read/write
+                                                                  ▼
+                                                            todos.json
+                                                                  │ file watching (sub-second)
+                                                ┌───────────────┼──────────────┐
+                                           ┌────▼────┐    ┌─────▼────┐   ┌─────▼────┐
+                                           │ Ghost HUD│    │Notifications│  │ Menu Bar  │
+                                           │ (display)│    │ (timed)   │   │(toggle/quit)│
+                                           └─────────┘    └──────────┘   └──────────┘
 ```
 
 - **Writes only through MCP**: the sole UI write action is "complete" on the HUD. Adding, editing, deleting, and changing priority/due date/description all go through MCP tools.
@@ -37,7 +37,7 @@ Agent (OpenCode / Codex / you) ──create/update/complete──▶  MCP Server
 - Menu bar tray: open-task count badge, show/hide the desktop note, interactive-mode switch, settings, quit.
 - Local macOS notifications for timed reminders; launch-at-login option.
 - `todopin-cli` command line tool (list / add / done / undone / update / delete, `--json` output) for scripts and agents.
-- MCP Server (`todopin-cli mcp`) so OpenCode, Codex, and other agents can manage TodoPin directly.
+- MCP Server (`todopin-cli mcp`) so agents can manage TodoPin directly.
 - No account system, no cloud sync, and no analytics.
 
 ## Privacy Model
@@ -53,7 +53,25 @@ TodoPin is local-first by design.
 
 Download the latest `TodoPin.dmg` from the GitHub Releases page, open it, and drag `TodoPin.app` into Applications.
 
-The current public build is ad-hoc signed. macOS Gatekeeper may show an unidentified developer warning. For a production distribution, build with a Developer ID certificate and notarize the DMG.
+The current public build is ad-hoc signed. macOS Gatekeeper may show an unidentified developer warning.
+
+## Registering the MCP Server
+
+Register it in your agent's MCP configuration over stdio (path points to the built `todopin-cli` binary, e.g. a release build):
+
+```json
+{
+  "mcp": {
+    "todopin": {
+      "type": "local",
+      "command": ["/path/to/TodoPin/.build/release/todopin-cli", "mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+Restart the agent and the six tools `list_tasks`, `create_task`, `update_task`, `complete_task`, `uncomplete_task`, and `delete_task` become available. Other MCP-capable agent clients register the same command over stdio.
 
 ## Command Line Tool
 
@@ -72,24 +90,6 @@ todopin-cli mcp                       # run as an MCP server
 ```
 
 While the app is running, CLI and MCP changes appear on the HUD within seconds via file watching.
-
-## Registering the MCP Server (OpenCode etc.)
-
-Add an entry to the `mcp` section of `~/.config/opencode/opencode.json` (path points to the built `todopin-cli` binary, e.g. a release build):
-
-```json
-{
-  "mcp": {
-    "todopin": {
-      "type": "local",
-      "command": ["/path/to/TodoPin/.build/release/todopin-cli", "mcp"],
-      "enabled": true
-    }
-  }
-}
-```
-
-Restart OpenCode and the six tools `list_tasks`, `create_task`, `update_task`, `complete_task`, `uncomplete_task`, and `delete_task` become available. Codex, Claude Code, and other clients register the same command over stdio.
 
 ## Build From Source
 

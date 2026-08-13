@@ -13,16 +13,16 @@ TodoPin 是一个**Agent native** 的本地优先 macOS 菜单栏待办应用（
 TodoPin 的定位是**「Agent 的任务面板」**：操作入口全部收敛到 MCP Server，App 退化为纯展示壳。
 
 ```
-Agent (OpenCode / Codex / 你) ──create/update/complete──▶  MCP Server
-                                                              │ 读写
-                                                              ▼
-                                                        todos.json
-                                                              │ 文件监听(秒级)
-                                              ┌───────────────┼──────────────┐
-                                         ┌────▼────┐    ┌─────▼────┐   ┌─────▼────┐
-                                         │ 幽灵 HUD │    │ 本地通知  │   │ 菜单栏托盘 │
-                                         │  (展示)  │    │(定时提醒) │   │(开关/退出)│
-                                         └─────────┘    └──────────┘   └──────────┘
+用户 ──自然语言指令──▶  Agent ──create/update/complete──▶  MCP Server
+                                                               │ 读写
+                                                               ▼
+                                                         todos.json
+                                                               │ 文件监听(秒级)
+                                               ┌───────────────┼──────────────┐
+                                          ┌────▼────┐    ┌─────▼────┐   ┌─────▼────┐
+                                          │ 幽灵 HUD │    │ 本地通知  │   │ 菜单栏托盘 │
+                                          │  (展示)  │    │(定时提醒) │   │(开关/退出)│
+                                          └─────────┘    └──────────┘   └──────────┘
 ```
 
 - **写操作只走 MCP**：UI 上唯一的写入口是 HUD 上的「勾选完成」；新增、编辑、删除、改优先级/截止/描述全部通过 MCP 工具完成。
@@ -37,7 +37,7 @@ Agent (OpenCode / Codex / 你) ──create/update/complete──▶  MCP Server
 - 菜单栏托盘：未完成数量徽标、显示/隐藏桌面便签、交互模式开关、设置、退出。
 - 本地 macOS 通知：任务提醒时间到点通知；支持登录时启动。
 - `todopin-cli` 命令行工具（list / add / done / undone / update / delete，`--json` 输出），供脚本与 Agent 调用。
-- MCP Server（`todopin-cli mcp`），OpenCode、Codex 等 Agent 可直接管理 TodoPin。
+- MCP Server（`todopin-cli mcp`），Agent 可直接管理 TodoPin。
 - 无账号系统、无云同步、无数据采集。
 
 ## 隐私模型
@@ -52,7 +52,25 @@ TodoPin 采用本地优先设计。
 
 从 GitHub Releases 页面下载最新 `TodoPin.dmg`，打开后把 `TodoPin.app` 拖入 Applications。
 
-当前公开发布为 ad-hoc 签名，macOS 门禁可能提示"无法验证开发者"。生产分发请使用 Developer ID 证书签名并公证 DMG。
+当前公开发布为 ad-hoc 签名，macOS 门禁可能提示"无法验证开发者"。
+
+## 注册 MCP Server
+
+在 Agent 的 MCP 配置中按 stdio 方式注册（路径指向已构建的 `todopin-cli` 二进制，如 release 构建）：
+
+```json
+{
+  "mcp": {
+    "todopin": {
+      "type": "local",
+      "command": ["/path/to/TodoPin/.build/release/todopin-cli", "mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+重启 Agent 后即可使用 `list_tasks`、`create_task`、`update_task`、`complete_task`、`uncomplete_task`、`delete_task` 六个工具。其他支持 MCP 的 Agent 客户端以同样的 stdio 方式注册即可。
 
 ## 命令行工具
 
@@ -71,24 +89,6 @@ todopin-cli mcp                       # 以 MCP Server 模式运行
 ```
 
 App 运行时通过文件监听自动刷新：CLI 或 MCP 的修改会秒级反映到 HUD。
-
-## 注册 MCP Server（OpenCode 等）
-
-在 `~/.config/opencode/opencode.json` 的 `mcp` 段添加（路径指向已构建的 `todopin-cli` 二进制，如 release 构建）：
-
-```json
-{
-  "mcp": {
-    "todopin": {
-      "type": "local",
-      "command": ["/path/to/TodoPin/.build/release/todopin-cli", "mcp"],
-      "enabled": true
-    }
-  }
-}
-```
-
-重启 OpenCode 后即可使用 `list_tasks`、`create_task`、`update_task`、`complete_task`、`uncomplete_task`、`delete_task` 六个工具。Codex、Claude Code 等客户端同样以 stdio 方式注册该命令即可。
 
 ## 从源码构建
 
