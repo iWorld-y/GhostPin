@@ -18,12 +18,16 @@ struct TodoPinApp: App {
             MenuBarContentView(appState: appState)
         } label: {
             let openCount = appState.todoStore.openItems().count
-            HStack(spacing: 5) {
-                TodoPinLogoMark(size: 16)
-                Text(openCount == 0 ? "TodoPin" : "\(openCount)")
+            HStack(spacing: 4) {
+                Image(systemName: "mappin.circle.fill")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.green)
+                if openCount > 0 {
+                    Text("\(openCount)")
+                }
             }
         }
-        .menuBarExtraStyle(.window)
+        .menuBarExtraStyle(.menu)
 
         Settings {
             SettingsView(appState: appState)

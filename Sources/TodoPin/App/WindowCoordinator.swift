@@ -3,45 +3,14 @@ import SwiftUI
 
 final class WindowCoordinator: NSObject, NSWindowDelegate {
     private weak var appState: AppState?
-    private var quickAddWindow: NSWindow?
     private var boardWindow: NSWindow?
+
+    var isBoardVisible: Bool {
+        boardWindow?.isVisible == true
+    }
 
     init(appState: AppState) {
         self.appState = appState
-    }
-
-    func showQuickAdd() {
-        guard let appState else {
-            return
-        }
-
-        if quickAddWindow == nil {
-            let window = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 420, height: 190),
-                styleMask: [.titled, .closable, .fullSizeContentView],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = "TodoPin"
-            window.isReleasedWhenClosed = false
-            window.delegate = self
-            configureFloatingPanel(window, hidesStandardButtons: true)
-            window.center()
-            quickAddWindow = window
-        }
-
-        quickAddWindow?.contentView = NSHostingView(
-            rootView: QuickAddPanelView(
-                appState: appState,
-                onClose: { [weak self] in
-                    self?.quickAddWindow?.close()
-                }
-            )
-        )
-        updateBoardLevel()
-
-        NSApp.activate(ignoringOtherApps: true)
-        quickAddWindow?.makeKeyAndOrderFront(nil)
     }
 
     func showBoard() {
@@ -90,8 +59,12 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         boardWindow?.orderOut(nil)
     }
 
-    func updateBoardLevel() {
-        quickAddWindow?.level = appState?.preferences.keepBoardOnTop == true ? .floating : .normal
+    func toggleBoard() {
+        if isBoardVisible {
+            hideBoard()
+        } else {
+            showBoard()
+        }
     }
 
     func updateHUD() {
@@ -121,9 +94,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        if notification.object as AnyObject? === quickAddWindow {
-            quickAddWindow?.contentView = nil
-        } else if notification.object as AnyObject? === boardWindow {
+        if notification.object as AnyObject? === boardWindow {
             boardWindow?.contentView = nil
         }
     }
@@ -151,22 +122,6 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
 
     private static func frameIntersectsAnyScreen(_ frame: NSRect) -> Bool {
         NSScreen.screens.contains { $0.frame.intersects(frame) }
-    }
-
-    private func configureFloatingPanel(_ window: NSPanel, hidesStandardButtons: Bool) {
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = true
-
-        guard hidesStandardButtons else {
-            return
-        }
-
-        window.standardWindowButton(.closeButton)?.isHidden = true
-        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        window.standardWindowButton(.zoomButton)?.isHidden = true
     }
 }
 

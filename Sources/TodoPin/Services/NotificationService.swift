@@ -7,23 +7,6 @@ final class NotificationService {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    func sendHourlyReminder(openItems: [TodoItem]) {
-        guard !openItems.isEmpty else {
-            return
-        }
-        let content = UNMutableNotificationContent()
-        content.title = "还有 \(openItems.count) 个待办"
-        content.body = openItems.prefix(3).map(\.title).joined(separator: " / ")
-        content.sound = nil
-
-        let request = UNNotificationRequest(
-            identifier: "todopin.hourly.\(Date().timeIntervalSince1970)",
-            content: content,
-            trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request)
-    }
-
     func sendTimedReminder(for item: TodoItem) {
         let content = UNMutableNotificationContent()
         content.title = "TodoPin 提醒"
