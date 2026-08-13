@@ -4,6 +4,8 @@
 
 # TodoPin
 
+**English** · [中文](README.zh-CN.md)
+
 TodoPin is a local-first macOS menu bar todo app for quickly capturing tasks with text or optional local voice transcription. It keeps lightweight sticky notes on the desktop, parses reminder times from todo text, and reminds you until a task is completed.
 
 The app is designed for private, single-user, local workflows. Todos are stored on your Mac as JSON files. Voice transcription can run locally with a small whisper.cpp model, and manual input works without installing any speech model.

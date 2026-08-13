@@ -1,6 +1,9 @@
 .build/
 .swiftpm/
 .codex/
+.claude/
+.opencode/
+.codegraph/
 dist/
 DerivedData/
 Sources/TodoPin/Resources/Models/*.bin
