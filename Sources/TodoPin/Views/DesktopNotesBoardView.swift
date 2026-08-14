@@ -198,16 +198,13 @@ private struct DesktopNoteCardView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                HStack(spacing: 7) {
-                    Label(Self.createdFormatter.string(from: item.createdAt), systemImage: "clock")
-                    if let reminderAt = item.reminderAt {
-                        Label(Self.reminderFormatter.string(from: reminderAt), systemImage: "bell")
-                    }
+                if let dueAt = item.dueAt {
+                    Text(Self.dueFormatter.string(from: dueAt))
+                        .font(.caption2)
+                        .foregroundStyle(item.isOverdue() ? .red : .secondary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .labelStyle(.titleAndIcon)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
             }
 
             Spacer(minLength: 0)
@@ -267,14 +264,7 @@ private struct DesktopNoteCardView: View {
         }
     }
 
-    private static let createdFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "M月d日 HH:mm"
-        return formatter
-    }()
-
-    private static let reminderFormatter: DateFormatter = {
+    private static let dueFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "M月d日 HH:mm"
