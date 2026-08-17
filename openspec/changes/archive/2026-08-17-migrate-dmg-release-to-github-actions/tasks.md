@@ -27,4 +27,4 @@
 
 - [x] 5.1 更新 README 或发布文档，说明修改 `script/VERSION` 后执行 `script/release.sh` 的自动提交、推 tag 与 GitHub Actions 发布流程
 - [x] 5.2 执行 shell 语法检查、核心检查、Workflow 静态校验及 DMG 打包验证
-- [ ] 5.3 使用测试 tag 完成一次端到端发布验收，确认 GitHub Release 中的 DMG 可下载且版本号一致
+- [x] 5.3 使用测试 tag 完成一次端到端发布验收，确认 GitHub Release 中的 DMG 可下载且版本号一致
