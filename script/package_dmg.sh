@@ -30,7 +30,9 @@ rm -rf "$APP_BUNDLE" "$DMG_STAGING" "$DMG_PATH"
 mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS" "$APP_RESOURCES"
 
 cp "$BUILD_BINARY" "$APP_BINARY"
-chmod +x "$APP_BINARY"
+cp "$BUILD_DIR/todopin-cli" "$APP_MACOS/todopin-cli"
+chmod +x "$APP_BINARY" "$APP_MACOS/todopin-cli"
+test -x "$APP_MACOS/todopin-cli" # 与主程序同取自 BUILD_DIR，同一次 release 构建
 
 if [[ -d "$ROOT_DIR/Sources/TodoPin/Resources" ]]; then
   rsync -a --exclude 'Models/README.md' "$ROOT_DIR/Sources/TodoPin/Resources/" "$APP_RESOURCES/"

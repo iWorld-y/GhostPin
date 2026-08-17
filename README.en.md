@@ -57,14 +57,14 @@ The current public build is ad-hoc signed. macOS Gatekeeper may show an unidenti
 
 ## Registering the MCP Server
 
-Register it in your agent's MCP configuration over stdio (path points to the built `todopin-cli` binary, e.g. a release build):
+Register it in your agent's MCP configuration over stdio (the `todopin-cli` binary is installed inside the app bundle):
 
 ```json
 {
   "mcp": {
     "todopin": {
       "type": "local",
-      "command": ["/path/to/TodoPin/.build/release/todopin-cli", "mcp"],
+      "command": ["/Applications/TodoPin.app/Contents/MacOS/todopin-cli", "mcp"],
       "enabled": true
     }
   }
@@ -75,7 +75,7 @@ Restart the agent and the six tools `list_tasks`, `create_task`, `update_task`, 
 
 ## Command Line Tool
 
-A `todopin-cli` binary is built alongside the repo for scripts and agents:
+The `todopin-cli` binary is installed inside the app bundle (`/Applications/TodoPin.app/Contents/MacOS/todopin-cli`) for scripts and agents. That directory is not on `$PATH`; either add it to `PATH` or use the full path in the examples below:
 
 ```bash
 todopin-cli list                      # list open tasks

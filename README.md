@@ -56,14 +56,14 @@ TodoPin 采用本地优先设计。
 
 ## 注册 MCP Server
 
-在 Agent 的 MCP 配置中按 stdio 方式注册（路径指向已构建的 `todopin-cli` 二进制，如 release 构建）：
+在 Agent 的 MCP 配置中按 stdio 方式注册（`todopin-cli` 随应用安装，位于 app bundle 内）：
 
 ```json
 {
   "mcp": {
     "todopin": {
       "type": "local",
-      "command": ["/path/to/TodoPin/.build/release/todopin-cli", "mcp"],
+      "command": ["/Applications/TodoPin.app/Contents/MacOS/todopin-cli", "mcp"],
       "enabled": true
     }
   }
@@ -74,7 +74,7 @@ TodoPin 采用本地优先设计。
 
 ## 命令行工具
 
-构建后 `todopin-cli` 随仓库提供，供脚本与 Agent 使用：
+`todopin-cli` 随应用安装在 app bundle 内（`/Applications/TodoPin.app/Contents/MacOS/todopin-cli`），供脚本与 Agent 使用。该目录不在 $PATH 中，可先将它加入 PATH，或在示例中改用完整路径：
 
 ```bash
 todopin-cli list                      # 列出未完成任务
