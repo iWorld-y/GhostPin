@@ -15,10 +15,28 @@ fi
 TAG="v$VERSION"
 echo ">>> 发布版本: $VERSION (tag: $TAG)"
 
-# 2. 工作区必须干净,防止把未提交改动打进去
-if ! git diff --quiet || ! git diff --cached --quiet; then
-  echo "错误: 工作区有未提交改动,请先提交或清理" >&2
+# 2. 工作区必须干净,但允许 script/VERSION 作为本次发布的版本输入
+dirty_paths=()
+while IFS= read -r status_line; do
+  [[ -z "$status_line" ]] && continue
+  dirty_paths+=("${status_line:3}")
+done < <(git status --porcelain=v1 --untracked-files=all)
+
+unexpected_dirty_paths=()
+for path in "${dirty_paths[@]}"; do
+  if [[ "$path" != "script/VERSION" ]]; then
+    unexpected_dirty_paths+=("$path")
+  fi
+done
+
+if ((${#unexpected_dirty_paths[@]} > 0)); then
+  echo "错误: 工作区有未提交改动,仅允许 script/VERSION 作为发布版本输入:" >&2
+  printf '  %s\n' "${unexpected_dirty_paths[@]}" >&2
   exit 1
+fi
+
+if ((${#dirty_paths[@]} > 0)); then
+  echo ">>> 检测到仅 script/VERSION 改动,作为发布版本输入继续"
 fi
 
 # 3. 同步 main 最新代码(含已合并的 PR)
