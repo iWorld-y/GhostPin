@@ -2,7 +2,7 @@
 set -euo pipefail
 
 MODE="${1:-run}"
-APP_NAME="TodoPin"
+APP_NAME="GhostPin"
 BUNDLE_ID="com.oyuxi.TodoPin"
 MIN_SYSTEM_VERSION="14.0"
 
@@ -23,14 +23,16 @@ pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 swift build
 BUILD_DIR="$(swift build --show-bin-path)"
 BUILD_BINARY="$BUILD_DIR/$APP_NAME"
+BUILD_CLI="$BUILD_DIR/ghostpin-cli"
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
-chmod +x "$APP_BINARY"
+cp "$BUILD_CLI" "$APP_MACOS/ghostpin-cli"
+chmod +x "$APP_BINARY" "$APP_MACOS/ghostpin-cli"
 
-if [[ -d "$ROOT_DIR/Sources/TodoPin/Resources" ]]; then
-  rsync -a --exclude 'Models/README.md' "$ROOT_DIR/Sources/TodoPin/Resources/" "$APP_RESOURCES/"
+if [[ -d "$ROOT_DIR/Sources/GhostPin/Resources" ]]; then
+  rsync -a --exclude 'Models/README.md' "$ROOT_DIR/Sources/GhostPin/Resources/" "$APP_RESOURCES/"
 fi
 
 cat >"$INFO_PLIST" <<PLIST

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- CLI 补齐优先级、截止日期和描述的新增与修改，并为根命令及每条子命令提供 `-h` / `--help`。
+- Agent 任务操作统一使用已安装应用内的 CLI Skill 和完整路径。
+- 产品更名为 GhostPin：App、CLI、Skill、DMG 和当前使用说明统一采用 GhostPin 名称。
+- CLI 更名为 `ghostpin-cli`，旧的 `todopin-cli` 不再随 App 分发；完整路径为 `/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli`。
+- 首次升级时将 `~/Library/Application Support/TodoPin/todos.json` 迁移到 `~/Library/Application Support/GhostPin/todos.json`，保留旧文件作为回退快照；新文件创建后不再双写。
+
+### Migration
+
+- 升级前退出旧 TodoPin.app 并将其从 `/Applications` 移除，再安装 GhostPin.app，避免两个版本同时运行。
+- 若需要回退，先停止 App 并备份两个目录中的 `todos.json`，确认要回退的数据后再手动复制；GhostPin 的新任务不会自动写回旧目录。
+
 ## v0.0.1 - 2026-08-13
 
 Agent native 版发布:任务的新增、修改、删除全部通过 MCP 完成,应用退化为纯展示壳(桌面幽灵 HUD + 托盘 + 本地通知)。

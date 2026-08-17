@@ -1,0 +1,4 @@
+interface:
+  display_name: "GhostPin CLI"
+  short_description: "通过已安装应用内命令行直接查询、创建、更新和删除 GhostPin 待办任务"
+  default_prompt: "使用 $ghostpin-cli 通过已安装应用内命令行列出我当前未完成的 GhostPin 任务。"

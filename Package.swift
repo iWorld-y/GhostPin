@@ -2,29 +2,24 @@
 import PackageDescription
 
 let package = Package(
-    name: "TodoPin",
+    name: "GhostPin",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "TodoPin", targets: ["TodoPin"]),
-        .executable(name: "todopin-cli", targets: ["TodoPinCLI"]),
-        .executable(name: "TodoPinCoreChecks", targets: ["TodoPinCoreChecks"])
+        .executable(name: "GhostPin", targets: ["GhostPin"]),
+        .executable(name: "ghostpin-cli", targets: ["GhostPinCLI"]),
+        .executable(name: "GhostPinCoreChecks", targets: ["GhostPinCoreChecks"])
     ],
     targets: [
         .target(
-            name: "TodoPinCore",
-            path: "Sources/TodoPinCore"
-        ),
-        .target(
-            name: "TodoPinMCP",
-            dependencies: ["TodoPinCore"],
-            path: "Sources/TodoPinMCP"
+            name: "GhostPinCore",
+            path: "Sources/GhostPinCore"
         ),
         .executableTarget(
-            name: "TodoPin",
-            dependencies: ["TodoPinCore"],
-            path: "Sources/TodoPin",
+            name: "GhostPin",
+            dependencies: ["GhostPinCore"],
+            path: "Sources/GhostPin",
             resources: [
                 .copy("Resources")
             ],
@@ -35,14 +30,14 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "TodoPinCoreChecks",
-            dependencies: ["TodoPinCore", "TodoPinMCP"],
-            path: "Tests/TodoPinCoreChecks"
+            name: "GhostPinCoreChecks",
+            dependencies: ["GhostPinCore"],
+            path: "Tests/GhostPinCoreChecks"
         ),
         .executableTarget(
-            name: "TodoPinCLI",
-            dependencies: ["TodoPinCore", "TodoPinMCP"],
-            path: "Sources/TodoPinCLI"
+            name: "GhostPinCLI",
+            dependencies: ["GhostPinCore"],
+            path: "Sources/GhostPinCLI"
         )
     ],
     swiftLanguageModes: [.v5]

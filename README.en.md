@@ -1,152 +1,147 @@
 <p align="center">
-  <img src="Sources/TodoPin/Resources/Logo/TodoPinLogo.png" width="128" height="128" alt="TodoPin app icon">
+  <img src="Sources/GhostPin/Resources/Logo/GhostPinLogo.png" width="128" height="128" alt="GhostPin app icon">
 </p>
 
-# TodoPin
+# GhostPin
 
 **English** · [中文](README.md)
 
-TodoPin is an **Agent-native**, local-first macOS menu bar todo app (SwiftUI + Swift Package Manager): task creation, updates, and deletions are done exclusively through MCP by agents, while the app itself only displays tasks (a desktop ghost HUD) and sends local notifications. Todos are stored on your Mac as JSON files. Requires macOS 14+, built with Swift 6.
+GhostPin is an **Agent-native**, local-first macOS menu bar todo app built with SwiftUI and Swift Package Manager. Agents manage tasks through the command-line tool shipped with the app; the app displays a desktop ghost HUD, watches the local file, and sends notifications. Data stays on your Mac. Requires macOS 14+ and Swift 6.
 
-## Design Philosophy: Agent Native
+## Design: Agent Native
 
-TodoPin is a **task panel for agents**. All write operations converge on the MCP server; the app is a pure display shell.
+GhostPin is a local task panel for agents. The agent reads and changes tasks through the CLI while the app focuses on display and notifications.
 
-```
-User ──natural language──▶  Agent ──create/update/complete──▶  MCP Server
-                                                                  │ read/write
-                                                                  ▼
-                                                            todos.json
-                                                                  │ file watching (sub-second)
-                                                ┌───────────────┼──────────────┐
-                                           ┌────▼────┐    ┌─────▼────┐   ┌─────▼────┐
-                                           │ Ghost HUD│    │Notifications│  │ Menu Bar  │
-                                           │ (display)│    │ (timed)   │   │(toggle/quit)│
-                                           └─────────┘    └──────────┘   └──────────┘
+```text
+User ──natural language──▶ Agent ──ghostpin-cli──▶ todos.json
+                                                     │ file watcher
+                                                     ▼
+                                        ghost HUD / notifications / menu bar
 ```
 
-- **Writes only through MCP**: the sole UI write action is "complete" on the HUD. Adding, editing, deleting, and changing priority/due date/description all go through MCP tools.
-- **Agents parse natural language**: reminder times and similar natural-language expressions are resolved by the agent (LLM) and passed as ISO8601; the app does no time parsing.
-- **No global shortcuts**: the app registers no global hotkeys (avoids conflicts with other software); pass-through/interactive mode is toggled from the menu bar.
-- **Live refresh via file watching**: after an agent modifies data via MCP/CLI, the HUD refreshes within seconds.
+- **Writes go through the CLI**: the only UI write action is completing a task on the HUD; creation, editing, deletion, status, priority, due date, and description changes use the CLI.
+- **Agents provide absolute time**: reminders and due dates use timezone-aware ISO8601 values; the app does not parse natural-language time.
+- **No global shortcuts**: the app registers no global shortcuts; the tray controls passthrough and interactive HUD modes.
+- **Live refresh**: CLI changes appear on the HUD within seconds without restarting the app.
 
 ## Features
 
-- Desktop ghost HUD: borderless, always on top, adjustable opacity, mouse click-through by default; pass-through/interactive mode is toggled via the menu bar "Interactive mode" switch. Window position, size, opacity, mode, and display scope persist across restarts.
-- Read-only HUD display: title, priority, due date, description, overdue strikethrough; the only interaction is marking tasks complete.
-- Menu bar tray: open-task count badge, show/hide the desktop note, interactive-mode switch, settings, quit.
-- Local macOS notifications for timed reminders; launch-at-login option.
-- `todopin-cli` command line tool (list / add / done / undone / update / delete, `--json` output) for scripts and agents.
-- MCP Server (`todopin-cli mcp`) so agents can manage TodoPin directly.
-- No account system, no cloud sync, and no analytics.
+- Desktop ghost HUD: borderless, always-on-top, adjustable opacity, click-through by default, with persisted position, size, opacity, mode, and scope.
+- Read-only HUD display: title, priority, due date, description, and overdue styling; the only interaction is completing a task.
+- Menu bar tray: open-task badge, show/hide HUD, interactive mode, settings, and quit.
+- Local macOS notifications for reminders, with launch-at-login support.
+- ghostpin-cli for listing, creating, status changes, updates, deletion, JSON output, and command-level help.
+- No accounts, cloud sync, or telemetry.
 
-## Privacy Model
+## Privacy
 
-TodoPin is local-first by design.
+GhostPin is local-first.
 
-- Todos are saved locally in `~/Library/Application Support/TodoPin/todos.json`.
-- Preferences are saved with macOS `UserDefaults`.
-- The app does not upload todos.
-- The app only uses network access when building dependencies from source.
+- Tasks are stored at ~/Library/Application Support/GhostPin/todos.json.
+- Preferences use macOS UserDefaults.
+- The app does not access the network at runtime.
+
+When upgrading from an older version, the first access copies `~/Library/Application Support/TodoPin/todos.json` into the GhostPin directory and keeps the old file as a rollback snapshot. Later writes use only the GhostPin file. Quit the old app before upgrading; if you need to roll back, back up both task files and choose which one to restore manually.
 
 ## Installation
 
-Download the latest `TodoPin.dmg` from the GitHub Releases page, open it, and drag `TodoPin.app` into Applications.
+Download the latest GhostPin-<version>.dmg from GitHub Releases, open it, and drag GhostPin.app into Applications.
 
-The current public build is ad-hoc signed. macOS Gatekeeper may show an unidentified developer warning.
+Public builds are currently ad-hoc signed, so macOS may warn that the developer cannot be verified.
 
-## Registering the MCP Server
+## Command-line tool
 
-Register it in your agent's MCP configuration over stdio (the `todopin-cli` binary is installed inside the app bundle):
+ghostpin-cli is installed inside the app bundle. The user-facing Skill always uses this full path:
 
-```json
-{
-  "mcp": {
-    "todopin": {
-      "type": "local",
-      "command": ["/Applications/TodoPin.app/Contents/MacOS/todopin-cli", "mcp"],
-      "enabled": true
-    }
-  }
-}
-```
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli
 
-Restart the agent and the six tools `list_tasks`, `create_task`, `update_task`, `complete_task`, `uncomplete_task`, and `delete_task` become available. Other MCP-capable agent clients register the same command over stdio.
-
-## Command Line Tool
-
-The `todopin-cli` binary is installed inside the app bundle (`/Applications/TodoPin.app/Contents/MacOS/todopin-cli`) for scripts and agents. That directory is not on `$PATH`; either add it to `PATH` or use the full path in the examples below:
+Every command supports -h and --help. To inspect command options:
 
 ```bash
-todopin-cli list                      # list open tasks
-todopin-cli add "Fix Redis issue"     # add a task
-todopin-cli add "Meeting" --reminder "2026-08-14T09:00:00+08:00"
-todopin-cli done <id>                 # complete a task
-todopin-cli undone <id>               # reopen a task
-todopin-cli update <id> --title "..." # update a task
-todopin-cli delete <id>               # delete a task
-todopin-cli list --json               # JSON output for agents
-todopin-cli mcp                       # run as an MCP server
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli --help
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update --help
 ```
 
-While the app is running, CLI and MCP changes appear on the HUD within seconds via file watching.
+Common commands:
 
-## Build From Source
+```bash
+# List open tasks
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli list --json
+
+# List all tasks
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli list --all --json
+
+# Create a task
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli add "Prepare report" --priority medium --due "2026-08-20T18:00:00+08:00" --description "Summarize weekly data" --json
+
+# Change status
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli doing <id> --json
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli done <id> --json
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli undone <id> --json
+
+# Update task fields
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --title "Prepare and send report" --priority high --due "2026-08-21T18:00:00+08:00" --description "Send to the team" --json
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --clear-due --json
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --clear-reminder --json
+
+# Delete a task
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli delete <id> --json
+```
+
+Reminders and due dates must be timezone-aware ISO8601 values. A non-zero exit code means the command failed.
+
+## Build from source
 
 Requirements:
 
-- macOS 14 or later
-- Xcode command line tools
+- macOS 14+
+- Xcode Command Line Tools
 - Swift Package Manager
 
-Build:
+For day-to-day development, use the Makefile:
+
+```bash
+make help                   # Show common commands
+make dev                    # Build and start the app
+make restart                # Build and restart the app
+make stop                   # Stop the app
+make logs                   # Start the app and stream logs
+make test                   # Run core behavior checks
+make cli ARGS='list --json' # Run the development CLI
+```
+
+The underlying scripts are also available:
 
 ```bash
 swift build
-```
-
-Run core checks:
-
-```bash
-swift run TodoPinCoreChecks
-```
-
-Create and verify a local `.app` bundle:
-
-```bash
+swift run GhostPinCoreChecks
 ./script/build_and_run.sh --verify
-```
-
-Create a release DMG:
-
-```bash
 ./script/package_dmg.sh
 ```
 
-## Signing And Distribution
-
-The packaging script supports ad-hoc signing by default.
-
-For public distribution with a Developer ID certificate:
+Releases are built by GitHub Actions on macOS. Update script/VERSION, then run:
 
 ```bash
-TODO_PIN_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./script/package_dmg.sh
+bash script/release.sh
 ```
 
-Notarization is not automated in this repository yet.
+For Developer ID distribution:
 
-## Repository Layout
+```bash
+GHOST_PIN_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./script/package_dmg.sh
+```
+
+## Repository layout
 
 ```text
-Sources/TodoPin/             macOS SwiftUI app
-Sources/TodoPinCore/         local todo, reminder, parser, and storage logic
-Sources/TodoPinCLI/          todopin-cli command line tool
-Sources/TodoPinMCP/          MCP server protocol and tool implementations
-Sources/TodoPin/Resources/   app icon and logo
-Tests/TodoPinCoreChecks/     executable core behavior checks
-script/                      app bundle and DMG packaging scripts
+Sources/GhostPin/             macOS SwiftUI app
+Sources/GhostPinCore/         todo, reminder, parsing, and storage logic
+Sources/GhostPinCLI/          ghostpin-cli command-line tool
+Sources/GhostPin/Resources/   app icon and logo
+Tests/GhostPinCoreChecks/     executable core behavior checks
+script/                      app packaging and DMG scripts
 ```
 
 ## License
 
-TodoPin is released under the MIT License. See [LICENSE](LICENSE).
+GhostPin is released under the MIT License. See LICENSE.

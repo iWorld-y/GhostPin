@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 一键发布 TodoPin:提交版本号 → 同步 main → 推送 tag → 触发 GitHub Actions 发布。
+# 一键发布 GhostPin:提交版本号 → 同步 main → 推送 tag → 触发 GitHub Actions 发布。
 # 用法: 先手动修改 script/VERSION 为最新版本号,然后执行 `bash script/release.sh`。
 set -euo pipefail
 

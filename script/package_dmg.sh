@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="TodoPin"
+APP_NAME="GhostPin"
 BUNDLE_ID="com.oyuxi.TodoPin"
 MIN_SYSTEM_VERSION="14.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${TODO_PIN_VERSION:-$(cat "$ROOT_DIR/script/VERSION" 2>/dev/null | tr -d '[:space:]' || true)}"
+VERSION="${GHOST_PIN_VERSION:-$(cat "$ROOT_DIR/script/VERSION" 2>/dev/null | tr -d '[:space:]' || true)}"
 VERSION="${VERSION:-0.0.1}"
 DMG_NAME="${APP_NAME}-${VERSION}.dmg"
 DIST_DIR="$ROOT_DIR/dist"
@@ -30,12 +30,12 @@ rm -rf "$APP_BUNDLE" "$DMG_STAGING" "$DMG_PATH"
 mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS" "$APP_RESOURCES"
 
 cp "$BUILD_BINARY" "$APP_BINARY"
-cp "$BUILD_DIR/todopin-cli" "$APP_MACOS/todopin-cli"
-chmod +x "$APP_BINARY" "$APP_MACOS/todopin-cli"
-test -x "$APP_MACOS/todopin-cli" # 与主程序同取自 BUILD_DIR，同一次 release 构建
+cp "$BUILD_DIR/ghostpin-cli" "$APP_MACOS/ghostpin-cli"
+chmod +x "$APP_BINARY" "$APP_MACOS/ghostpin-cli"
+test -x "$APP_MACOS/ghostpin-cli" # 与主程序同取自 BUILD_DIR，同一次 release 构建
 
-if [[ -d "$ROOT_DIR/Sources/TodoPin/Resources" ]]; then
-  rsync -a --exclude 'Models/README.md' "$ROOT_DIR/Sources/TodoPin/Resources/" "$APP_RESOURCES/"
+if [[ -d "$ROOT_DIR/Sources/GhostPin/Resources" ]]; then
+  rsync -a --exclude 'Models/README.md' "$ROOT_DIR/Sources/GhostPin/Resources/" "$APP_RESOURCES/"
 fi
 
 cat >"$INFO_PLIST" <<PLIST
@@ -69,8 +69,8 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
-if [[ -n "${TODO_PIN_SIGN_IDENTITY:-}" ]]; then
-  codesign --force --deep --options runtime --timestamp --sign "$TODO_PIN_SIGN_IDENTITY" "$APP_BUNDLE"
+if [[ -n "${GHOST_PIN_SIGN_IDENTITY:-}" ]]; then
+  codesign --force --deep --options runtime --timestamp --sign "$GHOST_PIN_SIGN_IDENTITY" "$APP_BUNDLE"
 else
   codesign --force --deep --sign - "$APP_BUNDLE"
 fi
@@ -92,6 +92,6 @@ hdiutil verify "$DMG_PATH"
 rm -rf "$DMG_STAGING"
 
 echo "Created $DMG_PATH"
-if [[ -z "${TODO_PIN_SIGN_IDENTITY:-}" ]]; then
-  echo "Signed ad-hoc. For public distribution, set TODO_PIN_SIGN_IDENTITY to a Developer ID Application identity and notarize the DMG."
+if [[ -z "${GHOST_PIN_SIGN_IDENTITY:-}" ]]; then
+  echo "Signed ad-hoc. For public distribution, set GHOST_PIN_SIGN_IDENTITY to a Developer ID Application identity and notarize the DMG."
 fi
