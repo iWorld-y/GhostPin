@@ -19,14 +19,17 @@ struct DesktopNotesBoardView: View {
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 10) {
-                            ForEach(hudItems) { item in
-                                DesktopNoteCardView(
-                                    item: item,
-                                    isActive: isActive,
-                                    onComplete: {
-                                        appState.setCompleted(item, completed: true)
-                                    }
-                                )
+                            if !doingItems.isEmpty {
+                                taskSectionHeader("Doing")
+                                ForEach(doingItems) { item in
+                                    taskCard(item)
+                                }
+                            }
+                            if !todoItems.isEmpty {
+                                taskSectionHeader("TODO")
+                                ForEach(todoItems) { item in
+                                    taskCard(item)
+                                }
                             }
                         }
                         .padding(.bottom, 4)
@@ -135,6 +138,32 @@ struct DesktopNotesBoardView: View {
         )
     }
 
+    private var doingItems: [TodoItem] {
+        hudItems.filter { $0.status == .doing }
+    }
+
+    private var todoItems: [TodoItem] {
+        hudItems.filter { $0.status == .todo }
+    }
+
+    private func taskCard(_ item: TodoItem) -> some View {
+        DesktopNoteCardView(
+            item: item,
+            isActive: isActive,
+            onAdvanceStatus: {
+                appState.advanceStatus(item)
+            }
+        )
+    }
+
+    private func taskSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .textCase(.uppercase)
+            .padding(.top, 2)
+    }
+
     private var isInteractive: Bool {
         appState.preferences.hudMode == .interactive
     }
@@ -165,18 +194,18 @@ struct DesktopNotesBoardView: View {
 private struct DesktopNoteCardView: View {
     let item: TodoItem
     let isActive: Bool
-    let onComplete: () -> Void
+    let onAdvanceStatus: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 11) {
-            Button(action: onComplete) {
+            Button(action: onAdvanceStatus) {
                 Image(systemName: "circle")
                     .font(.system(size: 15, weight: .medium))
                     .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(isActive ? .primary : .secondary)
-            .help("标记完成")
+            .foregroundStyle(item.status == .doing ? .orange : (isActive ? .primary : .secondary))
+            .help(item.status == .doing ? "标记完成" : "开始处理")
 
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {

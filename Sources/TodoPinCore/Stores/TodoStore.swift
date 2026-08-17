@@ -69,12 +69,26 @@ public final class TodoStore: ObservableObject {
         return item
     }
 
-    public func setCompleted(_ id: TodoItem.ID, completed: Bool, at date: Date = Date()) throws {
+    @discardableResult
+    public func setStatus(
+        _ id: TodoItem.ID,
+        status: TodoStatus,
+        at date: Date = Date()
+    ) throws -> TodoItem? {
         guard let index = items.firstIndex(where: { $0.id == id }) else {
-            return
+            return nil
         }
-        items[index].completedAt = completed ? date : nil
+        guard items[index].status != status else {
+            return items[index]
+        }
+        items[index].status = status
+        items[index].completedAt = status == .done ? date : nil
         try save()
+        return items[index]
+    }
+
+    public func setCompleted(_ id: TodoItem.ID, completed: Bool, at date: Date = Date()) throws {
+        _ = try setStatus(id, status: completed ? .done : .todo, at: date)
     }
 
     public func markTimedReminderSent(_ id: TodoItem.ID, at date: Date = Date()) throws {
@@ -160,7 +174,7 @@ public final class TodoStore: ObservableObject {
         let start = calendar.todoPinDayStart(for: date)
         let end = calendar.todoPinDayEnd(for: date)
         return items.filter { item in
-            guard let completedAt = item.completedAt else {
+            guard item.isCompleted, let completedAt = item.completedAt else {
                 return false
             }
             return completedAt >= start && completedAt <= end
@@ -173,6 +187,9 @@ public final class TodoStore: ObservableObject {
     }
 
     private static func isOrderedBefore(_ lhs: TodoItem, _ rhs: TodoItem, now: Date) -> Bool {
+        if lhs.status != rhs.status {
+            return lhs.status == .doing
+        }
         let lhsOverdue = lhs.isOverdue(now: now)
         let rhsOverdue = rhs.isOverdue(now: now)
         if lhsOverdue != rhsOverdue {

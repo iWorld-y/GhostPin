@@ -29,19 +29,20 @@ public func toolDefinitions() -> [ToolDefinition] {
         updateTaskTool,
         completeTaskTool,
         uncompleteTaskTool,
+        startTaskTool,
         deleteTaskTool
     ]
 }
 
 private let listTasksTool = ToolDefinition(
     name: "list_tasks",
-    description: "查询任务。默认只返回未完成任务，include_completed 为 true 时返回全部。",
+    description: "查询任务。默认只返回 Todo 和 Doing，include_completed 为 true 时返回全部。",
     inputSchema: .object([
         "type": .string("object"),
         "properties": .object([
             "include_completed": .object([
                 "type": .string("boolean"),
-                "description": .string("是否包含已完成任务，默认 false")
+                "description": .string("是否包含 Done 任务，默认 false")
             ])
         ])
     ])
@@ -214,7 +215,7 @@ private let updateTaskTool = ToolDefinition(
 
 private let completeTaskTool = ToolDefinition(
     name: "complete_task",
-    description: "将指定任务标记为完成。",
+    description: "将指定任务标记为 Done。",
     inputSchema: .object([
         "type": .string("object"),
         "required": .array([.string("id")]),
@@ -226,12 +227,12 @@ private let completeTaskTool = ToolDefinition(
         ])
     ])
 ) { arguments, storeURL in
-    try setCompleted(arguments, storeURL: storeURL, completed: true)
+    try setStatus(arguments, storeURL: storeURL, status: .done)
 }
 
 private let uncompleteTaskTool = ToolDefinition(
     name: "uncomplete_task",
-    description: "将已完成任务恢复为未完成。",
+    description: "将指定任务恢复为 Todo。",
     inputSchema: .object([
         "type": .string("object"),
         "required": .array([.string("id")]),
@@ -243,7 +244,24 @@ private let uncompleteTaskTool = ToolDefinition(
         ])
     ])
 ) { arguments, storeURL in
-    try setCompleted(arguments, storeURL: storeURL, completed: false)
+    try setStatus(arguments, storeURL: storeURL, status: .todo)
+}
+
+private let startTaskTool = ToolDefinition(
+    name: "start_task",
+    description: "将指定任务标记为 Doing。",
+    inputSchema: .object([
+        "type": .string("object"),
+        "required": .array([.string("id")]),
+        "properties": .object([
+            "id": .object([
+                "type": .string("string"),
+                "description": .string("任务 id")
+            ])
+        ])
+    ])
+) { arguments, storeURL in
+    try setStatus(arguments, storeURL: storeURL, status: .doing)
 }
 
 private let deleteTaskTool = ToolDefinition(
@@ -273,14 +291,14 @@ private let deleteTaskTool = ToolDefinition(
     ])
 }
 
-private func setCompleted(_ arguments: JSONValue, storeURL: URL, completed: Bool) throws -> JSONValue {
+private func setStatus(_ arguments: JSONValue, storeURL: URL, status: TodoStatus) throws -> JSONValue {
     let object = try argumentsObject(arguments)
     let id = try requireID(object)
     let store = try makeStore(at: storeURL)
     guard store.items.contains(where: { $0.id == id }) else {
         throw MCPToolError("未找到任务: \(id.uuidString)")
     }
-    try store.setCompleted(id, completed: completed)
+    try store.setStatus(id, status: status)
     guard let updated = store.items.first(where: { $0.id == id }) else {
         throw MCPToolError("未找到任务: \(id.uuidString)")
     }

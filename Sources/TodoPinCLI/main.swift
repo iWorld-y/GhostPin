@@ -58,10 +58,12 @@ private func run(_ arguments: [String]) throws {
         try runList(Array(arguments.dropFirst()))
     case "add":
         try runAdd(Array(arguments.dropFirst()))
+    case "doing":
+        try runSetStatus(Array(arguments.dropFirst()), status: .doing, commandName: "doing")
     case "done":
-        try runSetCompleted(Array(arguments.dropFirst()), completed: true)
+        try runSetStatus(Array(arguments.dropFirst()), status: .done, commandName: "done")
     case "undone":
-        try runSetCompleted(Array(arguments.dropFirst()), completed: false)
+        try runSetStatus(Array(arguments.dropFirst()), status: .todo, commandName: "undone")
     case "update":
         try runUpdate(Array(arguments.dropFirst()))
     case "delete":
@@ -69,7 +71,7 @@ private func run(_ arguments: [String]) throws {
     case "mcp":
         runMCPServer()
     default:
-        throw CLIError(message: "未知命令: \(command)\n\n\(usageText)", code: .usageError)
+        throw CLIError(message: "未知命令: \(command)\n\n\(usageText())", code: .usageError)
     }
 }
 
@@ -82,7 +84,7 @@ private func runList(_ arguments: [String]) throws {
         try printJSON(items.map(TodoItemPayload.init))
     } else {
         for item in items {
-            print("\(item.id.uuidString)\t\(item.isCompleted ? "done" : "open")\t\(item.title)")
+            print("\(item.id.uuidString)\t\(item.status.rawValue)\t\(item.title)")
         }
     }
 }
@@ -109,8 +111,7 @@ private func runAdd(_ arguments: [String]) throws {
     try successOutput(item)
 }
 
-private func runSetCompleted(_ arguments: [String], completed: Bool) throws {
-    let commandName = completed ? "done" : "undone"
+private func runSetStatus(_ arguments: [String], status: TodoStatus, commandName: String) throws {
     let parsed = try parseArguments(arguments, valueFlags: [], booleanFlags: ["--json"])
     guard let idString = parsed.positionals.first else {
         throw CLIError(message: "用法: todopin-cli \(commandName) <id>", code: .usageError)
@@ -119,7 +120,7 @@ private func runSetCompleted(_ arguments: [String], completed: Bool) throws {
     let id = try resolveID(idString)
     let store = try makeStore()
     _ = try requireItem(id, in: store)
-    try store.setCompleted(id, completed: completed)
+    try store.setStatus(id, status: status)
     let updated = try requireItem(id, in: store)
     try successOutput(updated)
 }
@@ -284,13 +285,15 @@ private func runMCPServer() {
     }
 }
 
-private let usageText = """
+private func usageText() -> String {
+    """
 todopin-cli - TodoPin 命令行工具
 
 命令:
   list                          列出未完成任务（--all 含已完成）
   add <标题> [--reminder <ISO8601>]
                                 新增任务
+  doing <id>                    标记任务为进行中
   done <id>                     标记任务完成
   undone <id>                   恢复任务为未完成
   update <id> [--title <标题>] [--reminder <ISO8601>] [--clear-reminder]
@@ -303,7 +306,8 @@ todopin-cli - TodoPin 命令行工具
   -h, --help                    显示帮助
   -v, --version                 显示版本
 """
+}
 
 private func printUsage() {
-    print(usageText)
+    print(usageText())
 }

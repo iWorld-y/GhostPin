@@ -17,6 +17,9 @@ final class AppState: ObservableObject {
         notificationService: notificationService
     )
     private var cancellables: Set<AnyCancellable> = []
+    private var statusClickTimes: [TodoItem.ID: UInt64] = [:]
+
+    private let statusClickCooldownNanoseconds: UInt64 = 500_000_000
 
     lazy var windowCoordinator = WindowCoordinator(appState: self)
 
@@ -92,6 +95,40 @@ final class AppState: ObservableObject {
     func setCompleted(_ item: TodoItem, completed: Bool) {
         do {
             try todoStore.setCompleted(item.id, completed: completed)
+        } catch {
+            report(error)
+        }
+    }
+
+    func advanceStatus(_ item: TodoItem) {
+        let now = DispatchTime.now().uptimeNanoseconds
+        if let lastClick = statusClickTimes[item.id],
+           now - lastClick < statusClickCooldownNanoseconds {
+            return
+        }
+
+        guard let current = todoStore.items.first(where: { $0.id == item.id }) else {
+            return
+        }
+        let nextStatus: TodoStatus?
+        switch current.status {
+        case .todo:
+            nextStatus = .doing
+        case .doing:
+            nextStatus = .done
+        case .done:
+            nextStatus = nil
+        }
+        guard let nextStatus else {
+            return
+        }
+
+        do {
+            guard let updated = try todoStore.setStatus(item.id, status: nextStatus),
+                  updated.status == nextStatus else {
+                return
+            }
+            statusClickTimes[item.id] = now
         } catch {
             report(error)
         }

@@ -11,6 +11,7 @@ public struct TodoItemPayload: Encodable {
         case id
         case title
         case createdAt
+        case status
         case completedAt
         case reminderAt
         case reminderSentAt
@@ -25,6 +26,7 @@ public struct TodoItemPayload: Encodable {
         try container.encode(item.id, forKey: .id)
         try container.encode(item.title, forKey: .title)
         try container.encode(item.createdAt, forKey: .createdAt)
+        try container.encode(item.status, forKey: .status)
         try container.encode(item.completedAt, forKey: .completedAt)
         try container.encode(item.reminderAt, forKey: .reminderAt)
         try container.encode(item.reminderSentAt, forKey: .reminderSentAt)

@@ -29,11 +29,13 @@ let checks: [Check] = [
     ("TodoStore.update changes reminder time and clears sent time", checkUpdateChangesReminderTimeAndClearsSentTime),
     ("TodoStore.update removes reminder time and clears sent time", checkUpdateRemovesReminderTimeAndClearsSentTime),
     ("TodoStore.setCompleted removes items from openItems", checkCompletedItemsAreRemovedFromOpenItems),
+    ("TodoStore transitions Todo Doing Done and restores Todo", checkTodoStatusTransitions),
     ("TodoStore.hudItems filters today scope by day boundary", checkHudItemsTodayScopeUsesDayBoundary),
     ("TodoStore.hudItems all scope includes every open item", checkHudItemsAllScopeIncludesEveryOpenItem),
     ("TodoStore.hudItems truncates to maxCount keeping newest first", checkHudItemsTruncatesToMaxCount),
     ("TodoStore.hudItems excludes completed items", checkHudItemsExcludesCompletedItems),
     ("TodoItem decodes legacy data with default priority", checkDecodesLegacyTodoItemWithoutNewFields),
+    ("TodoStore prioritizes Doing over Todo", checkDoingItemsAreSortedBeforeTodoItems),
     ("TodoStore sorts open items by priority then due date", checkSortsOpenItemsByPriorityThenDueDate),
     ("TodoStore sinks overdue items to bottom", checkSortsOverdueItemsToBottom),
     ("TodoStore sorts items without due date after those with", checkSortsItemsWithoutDueDateLast),
@@ -47,7 +49,7 @@ let checks: [Check] = [
     ("MCP parse error maps to -32700 with null id", checkMCPParseError),
     ("MCP unknown method maps to -32601", checkMCPUnknownMethod),
     ("MCP initialize handshake and ping", checkMCPInitializeHandshake),
-    ("MCP tools/list declares six tools with schemas", checkMCPToolsList),
+    ("MCP tools/list declares seven tools with schemas", checkMCPToolsList),
     ("MCP tool lifecycle create list complete uncomplete update delete", checkMCPToolLifecycle),
     ("MCP tool errors use isError and -32602 layering", checkMCPToolErrors),
     ("MCP reads fresh store on every call", checkMCPFreshStore),
@@ -133,6 +135,44 @@ func checkCompletedItemsAreRemovedFromOpenItems() throws {
     try store.setCompleted(first.id, completed: true)
 
     try check(store.openItems() == [second], "completed todo should not be open")
+}
+
+func checkTodoStatusTransitions() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let startedAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 0)
+    let completedAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 5)
+
+    let item = try require(try store.add(title: "状态任务"), "expected a todo")
+    try check(item.status == .todo, "new task should be todo")
+
+    let doing = try require(
+        try store.setStatus(item.id, status: .doing, at: startedAt),
+        "expected doing task"
+    )
+    try check(doing.status == .doing, "task should be doing")
+    try check(doing.completedAt == nil, "doing task should not have completedAt")
+    try check(!doing.isCompleted, "doing task should not be completed")
+
+    let done = try require(
+        try store.setStatus(item.id, status: .done, at: completedAt),
+        "expected completed task"
+    )
+    try check(done.status == .done, "task should be done")
+    try check(done.completedAt == completedAt, "done task should keep completion time")
+    try check(done.isCompleted, "done task should be completed")
+
+    let todo = try require(
+        try store.setStatus(item.id, status: .todo, at: completedAt),
+        "expected restored task"
+    )
+    try check(todo.status == .todo, "restored task should be todo")
+    try check(todo.completedAt == nil, "restored task should clear completion time")
+
+    let reloaded = makeStore(in: temporaryDirectory)
+    try reloaded.load()
+    try check(reloaded.items.first?.status == .todo, "restored status should persist")
 }
 
 func checkAddPersistsReminderTime() throws {
@@ -299,6 +339,7 @@ func checkDecodesLegacyTodoItemWithoutNewFields() throws {
     guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
         throw CheckFailure(message: "编码失败")
     }
+    object.removeValue(forKey: "status")
     object.removeValue(forKey: "priority")
     object.removeValue(forKey: "dueAt")
     object.removeValue(forKey: "description")
@@ -309,6 +350,62 @@ func checkDecodesLegacyTodoItemWithoutNewFields() throws {
     try check(decoded.priority == .medium, "旧数据缺失 priority 应默认为中")
     try check(decoded.dueAt == nil, "旧数据缺失 dueAt 应为 nil")
     try check(decoded.description == nil, "旧数据缺失 description 应为 nil")
+    try check(decoded.status == .todo, "旧的未完成任务应映射为 todo")
+
+    let completedItem = TodoItem(title: "旧完成任务", completedAt: makeDate(year: 2026, month: 6, day: 20, hour: 11, minute: 0))
+    let completedData = try JSONEncoder().encode(completedItem)
+    guard var completedObject = try JSONSerialization.jsonObject(with: completedData) as? [String: Any] else {
+        throw CheckFailure(message: "已完成旧数据编码失败")
+    }
+    completedObject.removeValue(forKey: "status")
+    let legacyCompletedData = try JSONSerialization.data(withJSONObject: completedObject)
+    let decodedCompleted = try JSONDecoder().decode(TodoItem.self, from: legacyCompletedData)
+    try check(decodedCompleted.status == .done, "旧的已完成任务应映射为 done")
+    try check(decodedCompleted.isCompleted, "旧的已完成任务应保持完成")
+
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let legacyURL = temporaryDirectory.appendingPathComponent("todos.json")
+    let fileEncoded = try JSONEncoder.todoPin.encode(item)
+    guard var fileObject = try JSONSerialization.jsonObject(with: fileEncoded) as? [String: Any] else {
+        throw CheckFailure(message: "文件格式旧数据编码失败")
+    }
+    fileObject.removeValue(forKey: "status")
+    fileObject.removeValue(forKey: "priority")
+    fileObject.removeValue(forKey: "dueAt")
+    fileObject.removeValue(forKey: "description")
+    let legacyListData = try JSONSerialization.data(withJSONObject: [fileObject])
+    try legacyListData.write(to: legacyURL)
+    let store = makeStore(in: temporaryDirectory)
+    try store.load()
+    try store.save()
+    let migrated = makeStore(in: temporaryDirectory)
+    try migrated.load()
+    try check(migrated.items.first?.status == .todo, "旧数据保存后应保留 todo 状态")
+}
+
+func checkDoingItemsAreSortedBeforeTodoItems() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let doing = try require(
+        try store.add(title: "Doing-低", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 9, minute: 0), priority: .low),
+        "expected doing task"
+    )
+    _ = try store.setStatus(doing.id, status: .doing, at: now)
+    _ = try store.add(
+        title: "Todo-高",
+        createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 10, minute: 0),
+        priority: .high
+    )
+
+    let titles = store.openItems(now: now).map(\.title)
+    try check(titles == ["Doing-低", "Todo-高"], "Doing 应排在所有 Todo 前，实际: \(titles)")
+
+    let hudItems = store.hudItems(scope: .all, maxCount: 1, now: now, calendar: checkCalendar)
+    try check(hudItems.map(\.title) == ["Doing-低"], "HUD 条数上限应优先保留 Doing")
 }
 
 func checkSortsOpenItemsByPriorityThenDueDate() throws {
@@ -371,6 +468,8 @@ func checkMCPCreateTaskWithNewFields() throws {
     let created = try toolResultPayload(createResponse)
     let createdTitle = try payloadString(created, "title")
     try check(createdTitle == "带字段", "create_task 标题错误")
+    let createdStatus = try payloadString(created, "status")
+    try check(createdStatus == "todo", "新任务状态应为 todo")
     let createdPriority = try payloadString(created, "priority")
     try check(createdPriority == "high", "create_task priority 应为 high，实际: \(createdPriority)")
     let dueText = try payloadString(created, "dueAt")
@@ -639,7 +738,7 @@ func checkMCPToolsList() throws {
 
     let expectedNames: Set<String> = [
         "list_tasks", "create_task", "update_task",
-        "complete_task", "uncomplete_task", "delete_task"
+        "complete_task", "uncomplete_task", "start_task", "delete_task"
     ]
     var names: Set<String> = []
     for tool in tools {
@@ -652,7 +751,7 @@ func checkMCPToolsList() throws {
         names.insert(name)
         try check(schemaType == "object", "inputSchema 应声明 type=object")
     }
-    try check(names == expectedNames, "tools/list 应返回六个预期工具")
+    try check(names == expectedNames, "tools/list 应返回七个预期工具")
 }
 
 func checkMCPToolLifecycle() throws {
@@ -684,9 +783,21 @@ func checkMCPToolLifecycle() throws {
         throw CheckFailure(message: "list_tasks 应返回数组")
     }
     try check(items.count == 1, "list_tasks 应包含 1 条任务")
+    let listedStatus = try payloadString(items[0], "status")
+    try check(listedStatus == "todo", "新任务默认状态应为 todo")
+
+    let startResponse = try require(
+        server.process(frame: mcpToolsCall(id: 3, name: "start_task", arguments: #"{"id":""# + id + #""}"#)),
+        "start_task 应有响应"
+    )
+    let started = try toolResultPayload(startResponse)
+    let startedStatus = try payloadString(started, "status")
+    let startedCompleted = try payloadBool(started, "isCompleted")
+    try check(startedStatus == "doing", "start_task 后状态应为 doing")
+    try check(!startedCompleted, "doing 任务不应已完成")
 
     let completeResponse = try require(
-        server.process(frame: mcpToolsCall(id: 3, name: "complete_task", arguments: #"{"id":""# + id + #""}"#)),
+        server.process(frame: mcpToolsCall(id: 4, name: "complete_task", arguments: #"{"id":""# + id + #""}"#)),
         "complete_task 应有响应"
     )
     let completed = try toolResultPayload(completeResponse)
@@ -694,7 +805,7 @@ func checkMCPToolLifecycle() throws {
     try check(completedFlag, "complete_task 后应已完成")
 
     let listAfterComplete = try toolResultPayload(try require(
-        server.process(frame: mcpToolsCall(id: 4, name: "list_tasks", arguments: "{}")),
+        server.process(frame: mcpToolsCall(id: 5, name: "list_tasks", arguments: "{}")),
         "list_tasks 应有响应"
     ))
     guard case .array(let openItems) = listAfterComplete else {
@@ -703,16 +814,31 @@ func checkMCPToolLifecycle() throws {
     try check(openItems.isEmpty, "完成后的默认 list_tasks 应为空")
 
     let uncompleteResponse = try require(
-        server.process(frame: mcpToolsCall(id: 5, name: "uncomplete_task", arguments: #"{"id":""# + id + #""}"#)),
+        server.process(frame: mcpToolsCall(id: 6, name: "uncomplete_task", arguments: #"{"id":""# + id + #""}"#)),
         "uncomplete_task 应有响应"
     )
     let uncompletedPayload = try toolResultPayload(uncompleteResponse)
     let uncompletedFlag = try payloadBool(uncompletedPayload, "isCompleted")
     try check(!uncompletedFlag, "uncomplete_task 后应未完成")
+    let uncompletedStatus = try payloadString(uncompletedPayload, "status")
+    try check(uncompletedStatus == "todo", "uncomplete_task 后状态应为 todo")
+
+    let restartResponse = try require(
+        server.process(frame: mcpToolsCall(id: 7, name: "start_task", arguments: #"{"id":""# + id + #""}"#)),
+        "重复 start_task 应有响应"
+    )
+    _ = try toolResultPayload(restartResponse)
+    let pauseResponse = try require(
+        server.process(frame: mcpToolsCall(id: 8, name: "uncomplete_task", arguments: #"{"id":""# + id + #""}"#)),
+        "Doing 任务 uncomplete_task 应有响应"
+    )
+    let paused = try toolResultPayload(pauseResponse)
+    let pausedStatus = try payloadString(paused, "status")
+    try check(pausedStatus == "todo", "Doing 任务恢复后状态应为 todo")
 
     let updateResponse = try require(
         server.process(frame: mcpToolsCall(
-            id: 6,
+            id: 9,
             name: "update_task",
             arguments: #"{"id":""# + id + #"","title":"改过的标题"}"#
         )),
@@ -726,7 +852,7 @@ func checkMCPToolLifecycle() throws {
 
     let clearResponse = try require(
         server.process(frame: mcpToolsCall(
-            id: 7,
+            id: 10,
             name: "update_task",
             arguments: #"{"id":""# + id + #"","clear_reminder":true}"#
         )),
@@ -739,7 +865,7 @@ func checkMCPToolLifecycle() throws {
     }
 
     let deleteResponse = try require(
-        server.process(frame: mcpToolsCall(id: 8, name: "delete_task", arguments: #"{"id":""# + id + #""}"#)),
+        server.process(frame: mcpToolsCall(id: 11, name: "delete_task", arguments: #"{"id":""# + id + #""}"#)),
         "delete_task 应有响应"
     )
     let deleted = try toolResultPayload(deleteResponse)
@@ -747,7 +873,7 @@ func checkMCPToolLifecycle() throws {
     try check(deletedID == id, "delete_task 返回的 id 应一致")
 
     let finalList = try toolResultPayload(try require(
-        server.process(frame: mcpToolsCall(id: 9, name: "list_tasks", arguments: "{}")),
+        server.process(frame: mcpToolsCall(id: 12, name: "list_tasks", arguments: "{}")),
         "list_tasks 应有响应"
     ))
     guard case .array(let finalItems) = finalList else {
@@ -814,14 +940,22 @@ func checkMCPFreshStore() throws {
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
     let server = makeMCPServer(in: temporaryDirectory)
 
-    _ = try toolResultPayload(try require(
+    let created = try toolResultPayload(try require(
         server.process(frame: mcpToolsCall(id: 1, name: "create_task", arguments: #"{"title":"第一条"}"#)),
         "create_task 应有响应"
     ))
+    let createdID = try payloadID(created)
 
     let externalStore = makeStore(in: temporaryDirectory)
     try externalStore.load()
     _ = try require(try externalStore.add(title: "外部写入"), "外部写入失败")
+    guard let externalID = UUID(uuidString: createdID) else {
+        throw CheckFailure(message: "create_task 返回的 id 无效")
+    }
+    _ = try require(
+        try externalStore.setStatus(externalID, status: .doing),
+        "外部状态更新失败"
+    )
 
     let listResponse = try require(
         server.process(frame: mcpToolsCall(id: 2, name: "list_tasks", arguments: "{}")),
@@ -831,6 +965,10 @@ func checkMCPFreshStore() throws {
         throw CheckFailure(message: "list_tasks 应返回数组")
     }
     try check(items.count == 2, "外部写入后 list_tasks 应读到最新数据（2 条）")
+    guard case .object(let first)? = items.first,
+          first["status"] == .string("doing") else {
+        throw CheckFailure(message: "外部写入 Doing 后 list_tasks 应读到最新状态")
+    }
 }
 
 func makeStore(in temporaryDirectory: URL) -> TodoStore {

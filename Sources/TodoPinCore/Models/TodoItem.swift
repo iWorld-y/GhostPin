@@ -4,6 +4,7 @@ public struct TodoItem: Identifiable, Codable, Equatable, Sendable {
     public let id: UUID
     public var title: String
     public let createdAt: Date
+    public var status: TodoStatus
     public var completedAt: Date?
     public var reminderAt: Date?
     public var reminderSentAt: Date?
@@ -15,6 +16,7 @@ public struct TodoItem: Identifiable, Codable, Equatable, Sendable {
         id: UUID = UUID(),
         title: String,
         createdAt: Date = Date(),
+        status: TodoStatus? = nil,
         completedAt: Date? = nil,
         reminderAt: Date? = nil,
         reminderSentAt: Date? = nil,
@@ -25,6 +27,7 @@ public struct TodoItem: Identifiable, Codable, Equatable, Sendable {
         self.id = id
         self.title = title
         self.createdAt = createdAt
+        self.status = status ?? (completedAt == nil ? .todo : .done)
         self.completedAt = completedAt
         self.reminderAt = reminderAt
         self.reminderSentAt = reminderSentAt
@@ -39,6 +42,8 @@ public struct TodoItem: Identifiable, Codable, Equatable, Sendable {
         self.title = try container.decode(String.self, forKey: .title)
         self.createdAt = try container.decode(Date.self, forKey: .createdAt)
         self.completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
+        self.status = try container.decodeIfPresent(TodoStatus.self, forKey: .status)
+            ?? (completedAt == nil ? .todo : .done)
         self.reminderAt = try container.decodeIfPresent(Date.self, forKey: .reminderAt)
         self.reminderSentAt = try container.decodeIfPresent(Date.self, forKey: .reminderSentAt)
         self.priority = try container.decodeIfPresent(Priority.self, forKey: .priority) ?? .medium
@@ -47,7 +52,7 @@ public struct TodoItem: Identifiable, Codable, Equatable, Sendable {
     }
 
     public var isCompleted: Bool {
-        completedAt != nil
+        status == .done
     }
 
     public var hasPendingTimedReminder: Bool {

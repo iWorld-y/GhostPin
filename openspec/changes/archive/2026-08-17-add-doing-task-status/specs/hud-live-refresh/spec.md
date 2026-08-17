@@ -1,12 +1,8 @@
-## Purpose
-
-定义 TodoPin App 对外部写入 `todos.json` 的感知与刷新行为：Agent 通过 CLI 修改任务后，HUD 秒级自动刷新，无需重启 App，且全程不抢占用户焦点。
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: 外部写入自动刷新
 
-App 运行期间，`todos.json` 被外部进程（如 CLI）修改后，HUD SHALL 在数秒内自动反映最新任务数据，无需重启 App；任务状态变化 MUST 触发对应的 HUD 分区和可见性更新。
+App 运行期间，`todos.json` 被外部进程（如 CLI 或 MCP）修改后，HUD SHALL 在数秒内自动反映最新任务数据，无需重启 App；任务状态变化 MUST 触发对应的 HUD 分区和可见性更新。
 
 #### Scenario: CLI 新增任务后 HUD 刷新
 
@@ -43,7 +39,7 @@ App 自身修改任务引发的文件变化 SHALL NOT 触发无意义的重载�
 
 #### Scenario: App 内操作不闪烁
 
-- **WHEN** 用户在 HUD 交互模式下勾选完成任务
+- **WHEN** 用户在 HUD 交互模式下点击圆形按钮推进任务状态
 - **THEN** 任务列表平滑更新，不出现重载导致的闪烁或列表跳动
 
 ### Requirement: 监听容错
