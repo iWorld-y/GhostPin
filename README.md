@@ -50,7 +50,7 @@ TodoPin 采用本地优先设计。
 
 ## 安装
 
-从 GitHub Releases 页面下载最新 `TodoPin.dmg`，打开后把 `TodoPin.app` 拖入 Applications。
+从 GitHub Releases 页面下载最新的 `TodoPin-<版本号>.dmg`，打开后把 `TodoPin.app` 拖入 Applications。
 
 当前公开发布为 ad-hoc 签名，macOS 门禁可能提示"无法验证开发者"。
 
@@ -122,9 +122,17 @@ swift run TodoPinCoreChecks
 ./script/package_dmg.sh
 ```
 
+正式版本发布由 GitHub Actions 在 macOS runner 上完成。发布前只修改 `script/VERSION`，然后执行：
+
+```bash
+bash script/release.sh
+```
+
+脚本会自动提交并推送版本号到 `main`，再推送对应的 `v<版本号>` tag；tag 推送后触发 GitHub Actions，完成核心检查、ad-hoc 签名、DMG 校验并创建 GitHub Release。普通提交不会触发发布。
+
 ## 签名与分发
 
-打包脚本默认使用 ad-hoc 签名。
+打包脚本和 GitHub Actions 发布默认使用 ad-hoc 签名，macOS 门禁可能提示"无法验证开发者"。
 
 使用 Developer ID 证书公开发布：
 

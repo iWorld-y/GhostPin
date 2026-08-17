@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 1
+
+      - name: Print build toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Validate tag version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          file_version="$(tr -d '[:space:]' < script/VERSION)"
+
+          if [[ -z "$version" || "$file_version" != "$version" ]]; then
+            echo "版本不一致: tag=$tag, script/VERSION=$file_version" >&2
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Run core checks
+        run: swift run TodoPinCoreChecks
+
+      - name: Build and package DMG
+        env:
+          TODO_PIN_VERSION: ${{ steps.version.outputs.version }}
+        run: ./script/package_dmg.sh
+
+      - name: Verify app and DMG
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app_path="dist/TodoPin.app"
+          dmg_path="dist/TodoPin-${VERSION}.dmg"
+          cli_path="$app_path/Contents/MacOS/todopin-cli"
+
+          test -f "$dmg_path"
+          test -x "$app_path/Contents/MacOS/TodoPin"
+          test -x "$cli_path"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+
+          mount_point="$(mktemp -d)"
+          cleanup() {
+            hdiutil detach "$mount_point" >/dev/null 2>&1 || true
+            rmdir "$mount_point" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount_point" "$dmg_path"
+          test -x "$mount_point/TodoPin.app/Contents/MacOS/TodoPin"
+          test -x "$mount_point/TodoPin.app/Contents/MacOS/todopin-cli"
+          codesign --verify --deep --strict --verbose=2 "$mount_point/TodoPin.app"
+          hdiutil detach "$mount_point"
+          rmdir "$mount_point"
+          trap - EXIT
+
+          hdiutil verify "$dmg_path"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "错误: Release $TAG 已存在,拒绝覆盖已有发布物" >&2
+            exit 1
+          fi
+
+          gh release create "$TAG" "dist/TodoPin-${VERSION}.dmg" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "TodoPin ${VERSION}" \
+            --notes "Agent native 版 ${VERSION}。任务操作走 MCP,App 仅负责展示与通知。"

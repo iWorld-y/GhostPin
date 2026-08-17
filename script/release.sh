@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 一键发布 TodoPin:同步 main → release 构建 → 打包 DMG → 打 tag → GitHub Release。
+# 一键发布 TodoPin:提交版本号 → 同步 main → 推送 tag → 触发 GitHub Actions 发布。
 # 用法: 先手动修改 script/VERSION 为最新版本号,然后执行 `bash script/release.sh`。
 set -euo pipefail
 
@@ -17,9 +17,14 @@ echo ">>> 发布版本: $VERSION (tag: $TAG)"
 
 # 2. 工作区必须干净,但允许 script/VERSION 作为本次发布的版本输入
 dirty_paths=()
+version_file_dirty=false
 while IFS= read -r status_line; do
   [[ -z "$status_line" ]] && continue
-  dirty_paths+=("${status_line:3}")
+  path="${status_line:3}"
+  dirty_paths+=("$path")
+  if [[ "$path" == "script/VERSION" ]]; then
+    version_file_dirty=true
+  fi
 done < <(git status --porcelain=v1 --untracked-files=all)
 
 unexpected_dirty_paths=()
@@ -36,40 +41,38 @@ if ((${#unexpected_dirty_paths[@]} > 0)); then
 fi
 
 if ((${#dirty_paths[@]} > 0)); then
-  echo ">>> 检测到仅 script/VERSION 改动,作为发布版本输入继续"
+  echo ">>> 检测到仅 script/VERSION 改动,将自动提交并推送版本号"
 fi
 
-# 3. 同步 main 最新代码(含已合并的 PR)
-git checkout main
-git pull origin main
-
-# 4. 防重复发布:tag 已存在则退出
-if git rev-parse "$TAG" >/dev/null 2>&1; then
+# 3. 防重复发布:本地或远程 tag 已存在则退出
+if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null 2>&1; then
   echo "错误: tag $TAG 已存在,该版本已发布过" >&2
   exit 1
 fi
 
-# 5. release 构建(本机 SPM manifest 沙箱问题,需 --disable-sandbox)
-swift build -c release --disable-sandbox
-
-# 6. 打包 DMG(版本号优先取 TODO_PIN_VERSION,回退读 script/VERSION)
-TODO_PIN_VERSION="$VERSION" ./script/package_dmg.sh
-
-# 7. 校验产物
-DMG_PATH="dist/TodoPin-$VERSION.dmg"
-if [[ ! -f "$DMG_PATH" ]]; then
-  echo "错误: DMG 未生成: $DMG_PATH" >&2
+remote_tags="$(git ls-remote --tags origin "refs/tags/$TAG")" || {
+  echo "错误: 无法查询远程 tag,已停止发布" >&2
+  exit 1
+}
+if [[ -n "$remote_tags" ]]; then
+  echo "错误: 远程 tag $TAG 已存在,该版本已发布过" >&2
   exit 1
 fi
 
-# 8. 打 tag 并推送
+# 4. 同步 main 最新代码(含已合并的 PR)
+git checkout main
+if [[ "$version_file_dirty" == true ]]; then
+  git add script/VERSION
+  git commit -m "发布版本 ${VERSION}"
+  git pull --rebase origin main
+  git push origin main
+else
+  git pull origin main
+fi
+
+# 5. 打 tag 并推送,由 GitHub Actions 负责构建 DMG 和创建 Release
 git tag "$TAG"
 git push origin "$TAG"
 
-# 9. 创建 GitHub Release 并上传 DMG
-gh release create "$TAG" "$DMG_PATH" \
-  --repo iWorld-y/TodoPin \
-  --title "TodoPin $VERSION" \
-  --notes "Agent native 版 ${VERSION}。任务操作走 MCP,App 仅负责展示与通知。"
-
-echo ">>> 发布完成: https://github.com/iWorld-y/TodoPin/releases/tag/$TAG"
+echo ">>> 已推送 tag: $TAG"
+echo ">>> GitHub Actions 将自动构建 DMG 并创建 Release"
