@@ -194,6 +194,7 @@ struct SettingsView: View {
     }
 }
 
+@MainActor
 private final class HotKeyRecorder: ObservableObject {
     @Published var isRecording = false
     @Published var validationMessage: String?

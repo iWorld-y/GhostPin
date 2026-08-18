@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 
+@MainActor
 final class WindowCoordinator: NSObject, NSWindowDelegate {
     private weak var appState: AppState?
     private var boardWindow: NSWindow?

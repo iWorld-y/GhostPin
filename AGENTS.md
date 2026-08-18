@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-GhostPin 是一个 **Agent native**、本地优先的 macOS 菜单栏待办应用，使用 SwiftUI、AppKit 和 Swift Package Manager。App 负责菜单栏、桌面幽灵 HUD、设置、文件监听与本地通知；任务主要由 Agent 通过随应用分发的 `ghostpin-cli` 管理。最低支持 macOS 14，使用 Swift 6 工具链并以 Swift 5 语言模式编译（`swiftLanguageModes: [.v5]`）。
+GhostPin 是一个 **Agent native**、本地优先的 macOS 菜单栏待办应用，使用 SwiftUI、AppKit 和 Swift Package Manager。App 负责菜单栏、桌面幽灵 HUD、设置、文件监听与本地通知；任务主要由 Agent 通过随应用分发的 `ghostpin-cli` 管理。最低支持 macOS 14，全部目标使用 Swift 6 语言模式编译（`swiftLanguageModes: [.v6]`）。
 
 ## Build & Run
 

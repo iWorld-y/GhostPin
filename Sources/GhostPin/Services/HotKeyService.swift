@@ -26,7 +26,7 @@ enum HotKeyRegistrationError: LocalizedError, Equatable {
 }
 
 final class HotKeyService {
-    private let action: () -> Void
+    private let action: @MainActor @Sendable () -> Void
     private var hotKeyRef: EventHotKeyRef?
     private var handlerRef: EventHandlerRef?
     private(set) var registeredShortcut: HotKeyShortcut?
@@ -35,7 +35,7 @@ final class HotKeyService {
         hotKeyRef != nil
     }
 
-    init(action: @escaping () -> Void) {
+    init(action: @escaping @MainActor @Sendable () -> Void) {
         self.action = action
     }
 
@@ -130,10 +130,8 @@ final class HotKeyService {
     }
 
     private func fireAction() {
-        if Thread.isMainThread {
+        Task { @MainActor [action] in
             action()
-        } else {
-            DispatchQueue.main.async { [action] in action() }
         }
     }
 

@@ -1,8 +1,6 @@
 import Foundation
 import GhostPinCore
 
-private let isoFormatter = ISO8601DateFormatter()
-
 private enum ExitCode: Int32 {
     case success = 0
     case runtimeError = 1
@@ -22,15 +20,6 @@ private struct ParsedArguments {
 
 let rawArguments = Array(CommandLine.arguments.dropFirst())
 let jsonRequested = rawArguments.contains("--json")
-
-do {
-    try run(rawArguments)
-} catch let error as CLIError {
-    emitFailure(error.message, exitCode: error.code)
-} catch {
-    emitFailure(error.localizedDescription, exitCode: .runtimeError)
-}
-exit(ExitCode.success.rawValue)
 
 private func emitFailure(_ message: String, exitCode: ExitCode) -> Never {
     if jsonRequested {
@@ -321,7 +310,8 @@ private func requireItem(_ id: TodoItem.ID, in store: TodoStore) throws -> TodoI
 }
 
 private func parseReminder(_ raw: String) throws -> Date {
-    guard let date = isoFormatter.date(from: raw) else {
+    let formatter = ISO8601DateFormatter()
+    guard let date = formatter.date(from: raw) else {
         throw CLIError(
             message: "无效的提醒时间: \(raw)（应为 ISO8601，如 2026-08-14T09:00:00+08:00）",
             code: .usageError
@@ -334,7 +324,8 @@ private func parseDueDate(_ raw: String?) throws -> Date? {
     guard let raw else {
         return nil
     }
-    guard let date = isoFormatter.date(from: raw) else {
+    let formatter = ISO8601DateFormatter()
+    guard let date = formatter.date(from: raw) else {
         throw CLIError(
             message: "无效的截止时间: \(raw)（应为 ISO8601，如 2026-08-14T18:00:00+08:00）",
             code: .usageError
@@ -448,3 +439,12 @@ ghostpin-cli - GhostPin 命令行工具
 private func printUsage() {
     print(usageText())
 }
+
+do {
+    try run(rawArguments)
+} catch let error as CLIError {
+    emitFailure(error.message, exitCode: error.code)
+} catch {
+    emitFailure(error.localizedDescription, exitCode: .runtimeError)
+}
+exit(ExitCode.success.rawValue)

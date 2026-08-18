@@ -48,6 +48,7 @@ struct GhostPinApp: App {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static weak var appState: AppState?
 

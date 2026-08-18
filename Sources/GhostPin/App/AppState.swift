@@ -3,6 +3,7 @@ import Foundation
 import SwiftUI
 import GhostPinCore
 
+@MainActor
 final class AppState: ObservableObject {
     let todoStore: TodoStore
     let preferences: AppPreferences

@@ -1,6 +1,7 @@
 import Foundation
 import GhostPinCore
 
+@MainActor
 final class ReminderService {
     private let todoStore: TodoStore
     private let notificationService: NotificationService
@@ -17,7 +18,9 @@ final class ReminderService {
     func start() {
         stop()
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            self?.evaluate()
+            Task { @MainActor in
+                self?.evaluate()
+            }
         }
         evaluate()
     }
