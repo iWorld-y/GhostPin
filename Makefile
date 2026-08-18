@@ -4,7 +4,7 @@ APP_NAME := GhostPin
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev start run restart stop build test verify logs telemetry cli dmg package
+.PHONY: help dev start run restart stop build test verify logs telemetry cli dmg package release
 
 help: ## 查看常用开发命令
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_.-]+:.*## / {printf "\033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -47,5 +47,8 @@ cli: ## 执行开发版 CLI，例如 make cli ARGS='list --json'
 
 dmg: ## 构建并校验 DMG
 	@./script/package_dmg.sh
+
+release: ## 发布新版本(先修改 script/VERSION 与 CHANGELOG,再执行)
+	@./script/release.sh
 
 package: dmg ## dmg 的别名

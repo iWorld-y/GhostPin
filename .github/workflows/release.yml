@@ -98,7 +98,21 @@ jobs:
             exit 1
           fi
 
+          notes_file="$(mktemp)"
+          awk -v ver="$VERSION" '
+            BEGIN { in_section = 0 }
+            /^## / {
+              if (!in_section && $2 == ("v" ver)) { in_section = 1; next }
+              if (in_section) exit
+            }
+            in_section { print }
+          ' CHANGELOG.md > "$notes_file"
+
+          if [[ ! -s "$notes_file" ]]; then
+            echo "Agent native 版 ${VERSION}。任务操作通过随应用分发的 CLI 完成,App 负责展示与通知。" > "$notes_file"
+          fi
+
           gh release create "$TAG" "dist/GhostPin-${VERSION}.dmg" \
             --repo "$GITHUB_REPOSITORY" \
             --title "GhostPin ${VERSION}" \
-            --notes "Agent native 版 ${VERSION}。任务操作通过随应用分发的 CLI 完成,App 负责展示与通知。"
+            --notes-file "$notes_file"
