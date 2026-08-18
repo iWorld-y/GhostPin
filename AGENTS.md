@@ -2,54 +2,77 @@
 
 ## 项目概述
 
-GhostPin 是一个 **Agent native** 的本地优先 macOS 菜单栏待办应用（SwiftUI + Swift Package Manager）：任务的新增/修改/删除由 Agent 按 `skills/ghostpin-cli/SKILL.md` 通过随应用分发的 CLI 完成，App 只负责展示（桌面幽灵 HUD，无边框置顶、默认鼠标点击穿透）与本地通知。纯本地存储，无云同步。最低支持 macOS 14，工具链为 Swift 6（包声明 `swiftLanguageModes: [.v5]`）。
+GhostPin 是一个 **Agent native**、本地优先的 macOS 菜单栏待办应用，使用 SwiftUI、AppKit 和 Swift Package Manager。App 负责菜单栏、桌面幽灵 HUD、设置、文件监听与本地通知；任务主要由 Agent 通过随应用分发的 `ghostpin-cli` 管理。最低支持 macOS 14，使用 Swift 6 工具链并以 Swift 5 语言模式编译（`swiftLanguageModes: [.v5]`）。
 
-**Agent native 约束（易踩坑）**：UI 上唯一的写入口是 HUD 的「勾选完成」（`setCompleted`）；其余写操作必须先读取 `skills/ghostpin-cli/SKILL.md`，再通过固定 App Bundle 路径中的 `ghostpin-cli` 完成。CLI 支持优先级、截止日期、描述和逐命令帮助。App 通过文件监听秒级刷新。不要给 App 层加任何录入/编辑 UI 或全局快捷键（唯一例外：设置「高级」页中默认关闭的可选交互模式切换快捷键，见 `openspec/specs/ghost-hud`）。
-
-## 架构边界（易错点）
-
-- `Sources/GhostPinCore/`：纯业务逻辑层（Model、TodoStore、JSON 存储），**不得 import AppKit/SwiftUI**，保证可被测试目标独立编译运行。
-- `Sources/GhostPin/`：应用层（AppDelegate、窗口管理、托盘菜单、通知、文件监听、可选全局快捷键），`@main` 入口在 `App/GhostPinApp.swift`。默认不注册全局快捷键；可选交互模式切换快捷键仅在用户于「高级」设置启用并配置后注册（Carbon 仅用于该单一注册）。
-- `Sources/GhostPinCLI/`：`ghostpin-cli` 可执行工具（参数解析、输出格式化），依赖 GhostPinCore。
-- `Tests/GhostPinCoreChecks/`：可执行测试目标，**不是 XCTest**（详见下节）。
-- 业务逻辑新增应放入 `GhostPinCore`，App 层通过 `AppState` 薄封装调用。
-
-## 常用命令
+## Build & Run
 
 ```bash
-make help                           # 查看常用开发命令
+make help                           # 查看 Makefile 中的可用命令
+make build                          # 构建全部 Swift 目标
 make dev                            # 构建并启动开发版 App
 make restart                        # 构建并重启开发版 App
-make stop                           # 停止 App
-make test                           # 运行核心行为检查（测试）
-make verify                         # 构建并验证进程可启动
-make logs                           # 启动并跟踪统一日志
-make telemetry                      # 启动并跟踪 GhostPin subsystem 日志
-make cli ARGS='list --json'         # 执行开发版 CLI
+make stop                           # 停止 GhostPin 进程
+make test                           # 运行全部核心行为检查
+make verify                         # 构建 App 并验证进程可启动
+make logs                           # 启动 App 并跟踪统一日志
+make telemetry                      # 跟踪 GhostPin subsystem 日志
+make cli ARGS='list --json'         # 执行开发版 CLI；可能访问真实本地任务数据
 make dmg                            # 构建并校验 DMG
 ```
 
-需要时也可以直接调用 `swift` 或 `script/` 下的底层命令。
+底层入口为 `swift build`、`swift run GhostPinCoreChecks`、`./script/build_and_run.sh --verify` 和 `./script/package_dmg.sh`。构建产物写入已忽略的 `.build/`、`dist/`。
 
-## 测试（最容易猜错）
+## Testing
 
-- 没有 XCTest。测试是 `Tests/GhostPinCoreChecks/main.swift` 里注册的 `checks` 数组，新增用例必须手动加入该数组，否则不会被执行。该目标依赖 GhostPinCore，覆盖任务字段、状态、排序、持久化和文件监听行为。
-- 运行：`swift run GhostPinCoreChecks`；任一用例失败输出 `FAIL` 并以退出码 1 结束。
-- 用例中时间解析固定使用东八区（GMT+8）zh_CN 日历，不要改动。
+- 测试目标是可执行程序 `GhostPinCoreChecks`，不是 XCTest；`swift test` 不是本仓库的测试入口。
+- 所有用例定义在 `Tests/GhostPinCoreChecks/main.swift`，并须手动注册到文件顶部的 `checks` 数组，否则不会执行。目前没有单用例筛选器。
+- 任一检查失败会输出 `FAIL` 并以退出码 1 结束。日期相关用例固定使用 GMT+8、`zh_CN` 日历，不要擅自更改。
+- Core 改动至少运行 `make test`；CLI 改动运行 `make build` 并为下沉到 Core 的行为运行 `make test`；AppKit/SwiftUI、窗口或设置改动运行 `make verify`；打包改动运行 `make dmg`。
 
-## 数据与依赖
+## Project Structure
 
-- 数据存于 `~/Library/Application Support/GhostPin/`（`todos.json`），偏好存 UserDefaults。路径定义在 `Sources/GhostPinCore/Support/StorageLocations.swift`。
-- 提醒为「定时提醒」：`reminderAt` 到点发本地通知并记录 `reminderSentAt`；无每小时提醒、无免打扰时段（ReminderPolicy/ReminderSettings 已删除）。
+- `Sources/GhostPinCore/`：Model、`TodoStore`、JSON 文件存储和日期支持；不得导入 AppKit 或 SwiftUI。
+- `Sources/GhostPin/`：应用入口、`AppState`、窗口协调、菜单栏、HUD、设置、通知、文件监听和可选全局快捷键。
+- `Sources/GhostPinCLI/`：`ghostpin-cli` 参数解析与输出，依赖 `GhostPinCore`。
+- `Tests/GhostPinCoreChecks/`：依赖 `GhostPinCore` 的可执行行为检查，不覆盖 CLI 参数解析或 AppKit/SwiftUI 层。
+- `skills/ghostpin-cli/`：已安装 App 的 Agent 操作契约。
+- `script/`：开发启动、DMG 打包与发布脚本。
+- `openspec/specs/`：当前正式规格；`openspec/changes/archive/`：已归档变更。
+- `.github/workflows/release.yml`：`v*` tag 触发的 DMG 发布流程。
 
-## 变更流程
+## Agent Native 与数据边界
 
-- `docs/需求-2026-08-13.md` 的幽灵 HUD 与 CLI 阶段已实现并归档，正式规格在 `openspec/specs/`，新需求可在此基础上另开变更。
-- 实现变更走 OpenSpec 流程（`openspec/config.yaml`，schema: spec-driven）：用 `.opencode` / `.claude` 下的 `opsx-propose` → `opsx-apply` → `opsx-archive` skills 或 `/opsx-*` 命令。
-- 无 CI、无 lint/formatter 配置（无 swiftlint/swiftformat）；代码风格为无注释、简短直白、类型标注完整，保持现状即可。
-- 仓库已索引 CodeGraph（`.codegraph/`），探索代码优先用 codegraph explore。
+- 处理真实 GhostPin 待办前，先读取 `skills/ghostpin-cli/SKILL.md`，并使用固定入口 `/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli`；不要直接编辑 `todos.json`，也不要用 `.build`、PATH 或 `swift run` 代替已安装 CLI。
+- 修改已有任务前先用 `list --all --json` 获取真实 UUID；同名无法消歧时先询问；写后检查 JSON 和退出码，删除后再次查询确认。
+- HUD 当前唯一允许的任务写交互是状态推进：`Todo → Doing → Done`（`AppState.advanceStatus`）。新增、字段编辑、重开和删除仍只能通过 CLI；不要给 App 增加这些录入 UI。
+- 全局快捷键只用于切换 HUD 穿透/交互模式，默认关闭且由用户在「高级」设置中配置；不要增加其他全局快捷键。
+- App 通过 `TodoFileWatcher` 监听 CLI 写入并重新加载；业务逻辑下沉到 `GhostPinCore`，`AppState` 只做服务和 UI 编排。
+- 任务数据位于 `~/Library/Application Support/GhostPin/todos.json`，偏好位于 UserDefaults。首次升级可从旧 `TodoPin/todos.json` 复制数据并保留源文件，不要破坏该兼容逻辑。
+- `reminderAt` 到点触发本地通知，发送后记录 `reminderSentAt`；没有周期提醒或免打扰策略。
 
-## 环境要求
+## Code Style
 
-- macOS 14+、Xcode 命令行工具、SPM。构建产物 `.build/`、`dist/` 均被 gitignore。
-- 应用为 accessory 激活策略（无 Dock 图标），运行验证用 `./script/build_and_run.sh --verify`。
+- 保持现有 Swift 风格：显式类型、早返回、简短函数、最少抽象和最少注释；不要顺手格式化或重构无关代码。
+- Core 中新增可复用业务逻辑，App 层只保留流程编排；新增文件和命名应匹配相邻目录。
+- 仓库没有 SwiftLint、SwiftFormat 或其他 lint/formatter 配置，不要声称运行了不存在的检查。
+
+```swift
+public func ghostPinDayStart(for date: Date) -> Date {
+    startOfDay(for: date)
+}
+```
+
+## Change, Git & Release Workflow
+
+- 新产品需求使用 `openspec/config.yaml` 的 `spec-driven` 流程：`opsx-propose` → `opsx-apply` → `opsx-archive`。不要把归档变更当作待实现任务。
+- 仓库有 `.codegraph/`；理解或定位代码时先运行 `codegraph explore "<问题或符号>"`，再使用精确的 `rg` 补充。
+- 提交信息使用中文；提交前检查 `git status --short`、暂存范围和与改动风险相称的验证结果。
+- 仓库没有常规 PR/test CI；唯一 GitHub Actions 工作流由 `v*` tag 触发，运行 Core checks、构建并校验 DMG、创建 GitHub Release。
+- `make release` / `script/release.sh` 会切换到 `main`、可能提交 `script/VERSION`、拉取并推送 `main`、创建并推送 tag。只有用户明确授权发布时才可运行，不能把它当作验证命令。
+- 用户文档包括 `README.md`、`README.en.md`、`CHANGELOG.md` 和 `docs/`；正式行为以 `openspec/specs/` 与当前代码为准。
+
+## Boundaries
+
+- ✅ **Always do:** 精准改动；为行为变化添加并注册检查；按改动层级运行 `make test`、`make verify` 或 `make dmg`；保持 CLI、App 与正式规格一致。
+- ⚠️ **Ask first:** 新增依赖、修改存储格式或迁移、改变公开 CLI 参数/JSON 契约、增加 App 写入口或全局快捷键、调整发布流程、执行任何发布或远程 Git 操作。
+- 🚫 **Never do:** 直接修改用户的 `todos.json`；让 `GhostPinCore` 依赖 UI 框架；绕过 `skills/ghostpin-cli/SKILL.md` 操作真实任务；未经授权推送 `main`、tag 或 Release；提交密钥、证书或签名材料。
