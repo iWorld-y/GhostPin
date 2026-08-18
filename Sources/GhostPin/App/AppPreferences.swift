@@ -50,6 +50,14 @@ final class AppPreferences: ObservableObject {
         didSet { saveHudFrame() }
     }
 
+    @Published var hudModeHotKeyEnabled: Bool {
+        didSet { defaults.set(hudModeHotKeyEnabled, forKey: Keys.hudModeHotKeyEnabled) }
+    }
+
+    @Published var hudModeHotKeyShortcut: HotKeyShortcut? {
+        didSet { saveHudModeHotKeyShortcut() }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -70,6 +78,13 @@ final class AppPreferences: ObservableObject {
         } else {
             self.hudFrame = nil
         }
+        self.hudModeHotKeyEnabled = defaults.bool(forKey: Keys.hudModeHotKeyEnabled)
+        if let data = defaults.data(forKey: Keys.hudModeHotKeyShortcut),
+           let decoded = try? JSONDecoder.ghostPin.decode(HotKeyShortcut.self, from: data) {
+            self.hudModeHotKeyShortcut = decoded
+        } else {
+            self.hudModeHotKeyShortcut = nil
+        }
     }
 
     private func saveHudMode() {
@@ -89,6 +104,15 @@ final class AppPreferences: ObservableObject {
         defaults.set(data, forKey: Keys.hudFrame)
     }
 
+    private func saveHudModeHotKeyShortcut() {
+        guard let hudModeHotKeyShortcut,
+              let data = try? JSONEncoder.ghostPin.encode(hudModeHotKeyShortcut) else {
+            defaults.removeObject(forKey: Keys.hudModeHotKeyShortcut)
+            return
+        }
+        defaults.set(data, forKey: Keys.hudModeHotKeyShortcut)
+    }
+
     private enum Keys {
         static let keepBoardOnTop = "keepBoardOnTop"
         static let launchAtLogin = "launchAtLogin"
@@ -98,5 +122,7 @@ final class AppPreferences: ObservableObject {
         static let hudMaxItems = "hudMaxItems"
         static let hudAllSpaces = "hudAllSpaces"
         static let hudFrame = "hudFrame"
+        static let hudModeHotKeyEnabled = "hudModeHotKeyEnabled"
+        static let hudModeHotKeyShortcut = "hudModeHotKeyShortcut"
     }
 }

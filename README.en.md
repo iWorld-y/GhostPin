@@ -21,14 +21,14 @@ User ──natural language──▶ Agent ──ghostpin-cli──▶ todos.jso
 
 - **Writes go through the CLI**: the only UI write action is completing a task on the HUD; creation, editing, deletion, status, priority, due date, and description changes use the CLI.
 - **Agents provide absolute time**: reminders and due dates use timezone-aware ISO8601 values; the app does not parse natural-language time.
-- **No global shortcuts**: the app registers no global shortcuts; the tray controls passthrough and interactive HUD modes.
+- **Optional global shortcut (off by default)**: no global shortcut is registered by default; you can record one in Settings → Advanced to toggle passthrough/interactive HUD mode. System-shortcut conflicts are pre-checked and failed registrations are rejected; conflicts with third-party apps cannot be fully detected.
 - **Live refresh**: CLI changes appear on the HUD within seconds without restarting the app.
 
 ## Features
 
 - Desktop ghost HUD: borderless, always-on-top, adjustable opacity, click-through by default, with persisted position, size, opacity, mode, and scope.
 - Read-only HUD display: title, priority, due date, description, and overdue styling; the only interaction is completing a task.
-- Menu bar tray: open-task badge, show/hide HUD, interactive mode, settings, and quit.
+- Menu bar tray: open-task badge, show/hide HUD, interactive mode, settings, and quit; settings include a HUD tab and an Advanced tab (optional global shortcut).
 - Local macOS notifications for reminders, with launch-at-login support.
 - ghostpin-cli for listing, creating, status changes, updates, deletion, JSON output, and command-level help.
 - No accounts, cloud sync, or telemetry.

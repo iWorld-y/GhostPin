@@ -42,6 +42,8 @@ struct GhostPinApp: App {
         Settings {
             SettingsView(appState: appState)
                 .frame(width: 420)
+                .onAppear { NSApp.setActivationPolicy(.regular) }
+                .onDisappear { NSApp.setActivationPolicy(.accessory) }
         }
     }
 }

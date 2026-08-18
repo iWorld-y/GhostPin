@@ -4,12 +4,12 @@
 
 GhostPin 是一个 **Agent native** 的本地优先 macOS 菜单栏待办应用（SwiftUI + Swift Package Manager）：任务的新增/修改/删除由 Agent 按 `skills/ghostpin-cli/SKILL.md` 通过随应用分发的 CLI 完成，App 只负责展示（桌面幽灵 HUD，无边框置顶、默认鼠标点击穿透）与本地通知。纯本地存储，无云同步。最低支持 macOS 14，工具链为 Swift 6（包声明 `swiftLanguageModes: [.v5]`）。
 
-**Agent native 约束（易踩坑）**：UI 上唯一的写入口是 HUD 的「勾选完成」（`setCompleted`）；其余写操作必须先读取 `skills/ghostpin-cli/SKILL.md`，再通过固定 App Bundle 路径中的 `ghostpin-cli` 完成。CLI 支持优先级、截止日期、描述和逐命令帮助。App 通过文件监听秒级刷新。不要给 App 层加任何录入/编辑 UI 或全局快捷键。
+**Agent native 约束（易踩坑）**：UI 上唯一的写入口是 HUD 的「勾选完成」（`setCompleted`）；其余写操作必须先读取 `skills/ghostpin-cli/SKILL.md`，再通过固定 App Bundle 路径中的 `ghostpin-cli` 完成。CLI 支持优先级、截止日期、描述和逐命令帮助。App 通过文件监听秒级刷新。不要给 App 层加任何录入/编辑 UI 或全局快捷键（唯一例外：设置「高级」页中默认关闭的可选交互模式切换快捷键，见 `openspec/specs/ghost-hud`）。
 
 ## 架构边界（易错点）
 
 - `Sources/GhostPinCore/`：纯业务逻辑层（Model、TodoStore、JSON 存储），**不得 import AppKit/SwiftUI**，保证可被测试目标独立编译运行。
-- `Sources/GhostPin/`：应用层（AppDelegate、窗口管理、托盘菜单、通知、文件监听），`@main` 入口在 `App/GhostPinApp.swift`。无全局快捷键（Carbon 已移除）。
+- `Sources/GhostPin/`：应用层（AppDelegate、窗口管理、托盘菜单、通知、文件监听、可选全局快捷键），`@main` 入口在 `App/GhostPinApp.swift`。默认不注册全局快捷键；可选交互模式切换快捷键仅在用户于「高级」设置启用并配置后注册（Carbon 仅用于该单一注册）。
 - `Sources/GhostPinCLI/`：`ghostpin-cli` 可执行工具（参数解析、输出格式化），依赖 GhostPinCore。
 - `Tests/GhostPinCoreChecks/`：可执行测试目标，**不是 XCTest**（详见下节）。
 - 业务逻辑新增应放入 `GhostPinCore`，App 层通过 `AppState` 薄封装调用。
