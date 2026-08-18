@@ -1,5 +1,6 @@
 import AppKit
 
+@MainActor
 enum GhostPinAssets {
     static let logo = loadImage(named: "GhostPinLogo")
     static let statusBar = loadImage(named: "GhostPinStatusBar", isTemplate: true)
