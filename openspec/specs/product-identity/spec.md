@@ -64,3 +64,22 @@ GhostPin SHALL 将 `~/Library/Application Support/GhostPin/todos.json` 作为默
 
 - **WHEN** 维护者执行改名验收
 - **THEN** 当前交付内容中仅兼容 Bundle ID 允许出现旧品牌，归档与旧发布记录未被改写，`TodoItem`、`TodoStore`、`TodoStatus` 等领域术语保持不变
+
+### Requirement: 设置窗口期间的应用切换器可见性
+
+系统默认 SHALL 以菜单栏常驻形态运行：无 Dock 图标，不出现在 Cmd+Tab 应用切换器中。设置窗口打开期间，系统 SHALL 临时以常规应用形态出现，使设置窗口出现在 Cmd+Tab 应用切换器中并在调度中心显示应用图标；设置窗口关闭后，系统 SHALL 恢复菜单栏常驻形态。
+
+#### Scenario: 打开设置后出现在应用切换器
+
+- **WHEN** 用户从菜单栏托盘打开设置窗口
+- **THEN** 应用出现在 Cmd+Tab 应用切换器中，调度中心显示其设置窗口与应用图标，用户可通过切换器回到设置窗口
+
+#### Scenario: 关闭设置后恢复菜单栏形态
+
+- **WHEN** 用户关闭设置窗口
+- **THEN** 应用从 Cmd+Tab 应用切换器中消失并恢复无 Dock 图标的菜单栏常驻形态，HUD 的显示、穿透/交互与焦点行为不变
+
+#### Scenario: 未打开设置时保持常驻形态
+
+- **WHEN** 应用正在运行且设置窗口未打开
+- **THEN** 应用不出现于 Cmd+Tab 应用切换器、不显示 Dock 图标，仍可通过菜单栏托盘使用
