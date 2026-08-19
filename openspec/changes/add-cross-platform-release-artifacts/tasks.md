@@ -23,4 +23,4 @@
 - [x] 4.1 在 macOS 运行核心检查和 `make package`，验证现有 DMG 名称、Bundle、签名、CLI 路径与挂载完整性未回归
 - [x] 4.2 在 Windows 11 x64 运行 solution 测试和 `make package`，确认 dist 只有一个目标 EXE，并验证版本、图标以及启动/退出行为
 - [x] 4.3 校验 Workflow YAML、Shell/PowerShell 脚本语法、`make help` 输出与 `git diff --check`，并运行 `openspec validate --all --strict`
-- [ ] 4.4 代码进入远端 `main` 后手动运行一次 `workflow_dispatch`，确认两个 Actions artifacts 均可下载且没有创建 GitHub Release
+- [x] 4.4 代码进入远端 `main` 后手动运行一次 `workflow_dispatch`，确认两个 Actions artifacts 均可下载且没有创建 GitHub Release
