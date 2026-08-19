@@ -24,6 +24,8 @@ public static class HudSettingsCodec
             IsTopmost = ReadBoolean(root, "isTopmost", defaults.IsTopmost),
             Scope = ReadScope(root, defaults.Scope),
             MaxItems = ReadMaxItems(root, defaults.MaxItems),
+            HudModeHotKeyEnabled = ReadBoolean(root, "hudModeHotKeyEnabled", defaults.HudModeHotKeyEnabled),
+            HudModeHotKeyShortcut = ReadHotKeyShortcut(root),
             Placement = ReadPlacement(root, defaults.Placement)
         };
         return settings.Normalize();
@@ -43,6 +45,9 @@ public static class HudSettingsCodec
             writer.WriteBoolean("isTopmost", settings.IsTopmost);
             writer.WriteString("scope", ToWire(settings.Scope));
             writer.WriteNumber("maxItems", settings.MaxItems);
+            writer.WriteBoolean("hudModeHotKeyEnabled", settings.HudModeHotKeyEnabled);
+            writer.WritePropertyName("hudModeHotKeyShortcut");
+            WriteHotKeyShortcut(writer, settings.HudModeHotKeyShortcut);
             writer.WritePropertyName("placement");
             WritePlacement(writer, settings.Placement);
             writer.WriteEndObject();
@@ -79,7 +84,7 @@ public static class HudSettingsCodec
     private static int ReadMaxItems(JsonElement root, int fallback)
     {
         if (root.TryGetProperty("maxItems", out var value) && value.ValueKind == JsonValueKind.Number &&
-            value.TryGetInt32(out var maxItems) && maxItems is >= 1 and <= 100)
+            value.TryGetInt32(out var maxItems) && maxItems is >= 1 and <= 20)
         {
             return maxItems;
         }
@@ -115,6 +120,39 @@ public static class HudSettingsCodec
             "today" => HudScope.Today,
             _ => fallback
         };
+    }
+
+    private static HotKeyShortcut? ReadHotKeyShortcut(JsonElement root)
+    {
+        if (!root.TryGetProperty("hudModeHotKeyShortcut", out var value) || value.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+        if (!value.TryGetProperty("virtualKey", out var virtualKeyValue) ||
+            virtualKeyValue.ValueKind != JsonValueKind.Number ||
+            !virtualKeyValue.TryGetInt32(out var virtualKey) ||
+            !value.TryGetProperty("modifiers", out var modifiersValue) ||
+            modifiersValue.ValueKind != JsonValueKind.Number ||
+            !modifiersValue.TryGetUInt32(out var modifiers))
+        {
+            return null;
+        }
+
+        return HotKeyShortcut.Create(virtualKey, (HotKeyModifiers)modifiers);
+    }
+
+    private static void WriteHotKeyShortcut(Utf8JsonWriter writer, HotKeyShortcut? shortcut)
+    {
+        if (shortcut is null)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        writer.WriteStartObject();
+        writer.WriteNumber("virtualKey", shortcut.VirtualKey);
+        writer.WriteNumber("modifiers", (uint)shortcut.Modifiers);
+        writer.WriteEndObject();
     }
 
     private static WindowPlacement ReadPlacement(JsonElement root, WindowPlacement fallback)

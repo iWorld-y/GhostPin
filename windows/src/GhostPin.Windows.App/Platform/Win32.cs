@@ -21,7 +21,9 @@ public static class Win32
     public const uint SwpFrameChanged = 0x0020;
     public const uint SwpShowWindow = 0x0040;
     public const uint WmNcHitTest = 0x0084;
+    public const uint WmHotKey = 0x0312;
     public const uint WmDpiChanged = 0x02E0;
+    public const uint ModNoRepeat = 0x4000;
     public const uint MonitorDefaultToPrimary = 0x00000001;
     public const uint MonitorDefaultToNearest = 0x00000002;
     public const uint DpiAwarenessContextPerMonitorAwareV2 = unchecked((uint)-4);
@@ -76,6 +78,14 @@ public static class Win32
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool ShowWindow(IntPtr hWnd, int command);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint modifiers, uint virtualKey);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
     public static long GetExtendedStyle(IntPtr hwnd)
     {

@@ -11,6 +11,8 @@ public sealed record class HudSettings
     public bool IsTopmost { get; set; } = true;
     public HudScope Scope { get; set; } = HudScope.All;
     public int MaxItems { get; set; } = 8;
+    public bool HudModeHotKeyEnabled { get; set; }
+    public HotKeyShortcut? HudModeHotKeyShortcut { get; set; }
     public WindowPlacement Placement { get; set; } = WindowPlacement.Default;
 
     public static HudSettings Default => new();
@@ -20,7 +22,8 @@ public sealed record class HudSettings
         return this with
         {
             Opacity = double.IsFinite(Opacity) ? Math.Clamp(Opacity, 0.5, 1.0) : 0.92,
-            MaxItems = Math.Clamp(MaxItems, 1, 100),
+            MaxItems = Math.Clamp(MaxItems, 1, 20),
+            HudModeHotKeyEnabled = HudModeHotKeyEnabled && HudModeHotKeyShortcut is not null,
             Placement = NormalizePlacement(Placement)
         };
     }

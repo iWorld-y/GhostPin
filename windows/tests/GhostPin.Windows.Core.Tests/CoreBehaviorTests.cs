@@ -406,7 +406,9 @@ public sealed class SettingsTests
             Opacity = 0.7,
             IsTopmost = false,
             Scope = HudScope.Today,
-            MaxItems = 12
+            MaxItems = 12,
+            HudModeHotKeyEnabled = true,
+            HudModeHotKeyShortcut = HotKeyShortcut.Create(0x47, HotKeyModifiers.Control | HotKeyModifiers.Alt)
         };
 
         var restored = HudSettingsCodec.Deserialize(HudSettingsCodec.Serialize(settings));
@@ -417,6 +419,8 @@ public sealed class SettingsTests
         Assert.IsFalse(restored.IsTopmost);
         Assert.AreEqual(HudScope.Today, restored.Scope);
         Assert.AreEqual(12, restored.MaxItems);
+        Assert.IsTrue(restored.HudModeHotKeyEnabled);
+        Assert.AreEqual("Ctrl+Alt+G", restored.HudModeHotKeyShortcut?.DisplayName);
     }
 
     [TestMethod]
@@ -443,6 +447,32 @@ public sealed class SettingsTests
         Assert.AreEqual(360, settings.Placement.LogicalWidth, 0.0001);
         Assert.AreEqual(600, settings.Placement.LogicalHeight, 0.0001);
         Assert.AreEqual(-20, settings.Placement.RelativeX, 0.0001);
+    }
+
+    [TestMethod]
+    public void MaxItemsAboveSettingsWindowRangeFallsBackToDefault()
+    {
+        var settings = HudSettingsCodec.Deserialize("""
+            {
+              "maxItems": 21
+            }
+            """);
+
+        Assert.AreEqual(8, settings.MaxItems);
+    }
+
+    [TestMethod]
+    public void InvalidHotKeyIsDroppedAndCannotRemainEnabled()
+    {
+        var settings = HudSettingsCodec.Deserialize("""
+            {
+              "hudModeHotKeyEnabled": true,
+              "hudModeHotKeyShortcut": { "virtualKey": 71, "modifiers": 0 }
+            }
+            """);
+
+        Assert.IsFalse(settings.HudModeHotKeyEnabled);
+        Assert.IsNull(settings.HudModeHotKeyShortcut);
     }
 
     [TestMethod]
@@ -502,6 +532,31 @@ public sealed class SettingsTests
         {
             temporary.Delete(true);
         }
+    }
+}
+
+[TestClass]
+public sealed class HotKeyShortcutTests
+{
+    [TestMethod]
+    public void RequiresModifierExceptForFunctionKeys()
+    {
+        Assert.IsNull(HotKeyShortcut.Create(0x47, HotKeyModifiers.None));
+        Assert.IsNull(HotKeyShortcut.Create(0x11, HotKeyModifiers.Control));
+        Assert.IsNull(HotKeyShortcut.Create(0xA2, HotKeyModifiers.Control));
+        Assert.AreEqual("F8", HotKeyShortcut.Create(0x77, HotKeyModifiers.None)?.DisplayName);
+    }
+
+    [TestMethod]
+    public void NormalizesModifiersAndBuildsStableDisplayName()
+    {
+        var shortcut = HotKeyShortcut.Create(
+            0x47,
+            HotKeyModifiers.Control | HotKeyModifiers.Alt | (HotKeyModifiers)0x8000);
+
+        Assert.IsNotNull(shortcut);
+        Assert.AreEqual(HotKeyModifiers.Control | HotKeyModifiers.Alt, shortcut.Modifiers);
+        Assert.AreEqual("Ctrl+Alt+G", shortcut.DisplayName);
     }
 }
 
@@ -585,6 +640,18 @@ public sealed class WindowPlacementTests
 [TestClass]
 public sealed class PlatformPureFunctionTests
 {
+    [TestMethod]
+    public void TrayIconLoadsBundledMacStatusBarAsset()
+    {
+        using var icon = TrayIconLoader.Load(new Uri(
+            "/GhostPin.Windows.App;component/Assets/GhostPinStatusBar.png",
+            UriKind.Relative));
+
+        Assert.AreNotEqual(IntPtr.Zero, icon.Handle);
+        Assert.AreEqual(32, icon.Width);
+        Assert.AreEqual(32, icon.Height);
+    }
+
     [TestMethod]
     public void HudStylesKeepOnlyExpectedPassthroughBits()
     {

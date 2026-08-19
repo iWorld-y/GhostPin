@@ -23,5 +23,8 @@
     <Resource Include="..\..\..\Sources\GhostPin\Resources\Logo\GhostPinLogo.png">
       <Link>Assets\GhostPinLogo.png</Link>
     </Resource>
+    <Resource Include="..\..\..\Sources\GhostPin\Resources\Logo\GhostPinStatusBar.png">
+      <Link>Assets\GhostPinStatusBar.png</Link>
+    </Resource>
   </ItemGroup>
 </Project>

@@ -21,21 +21,17 @@ public sealed class HudController
     private readonly TodoFileWatcher _watcher;
     private readonly HudWindowHost _windowHost;
     private readonly WindowPlacementService _placementService = new();
+    private readonly SettingsWindow _settingsWindow;
+    private GlobalHotKeyService? _hotKeyService;
     private HudSettings _settings = HudSettings.Default;
+    private HotKeySetupState _hotKeySetupState = HotKeySetupState.Disabled;
+    private HotKeySetupState? _hotKeyStateBeforeRecording;
+    private string? _hotKeyMessage;
     private System.Windows.Forms.NotifyIcon? _notifyIcon;
+    private System.Windows.Forms.ContextMenuStrip? _notifyMenu;
+    private System.Drawing.Icon? _trayIcon;
     private System.Windows.Forms.ToolStripMenuItem? _visibilityMenuItem;
     private System.Windows.Forms.ToolStripMenuItem? _modeMenuItem;
-    private System.Windows.Forms.ToolStripMenuItem? _topmostMenuItem;
-    private System.Windows.Forms.ToolStripMenuItem? _scopeAllMenuItem;
-    private System.Windows.Forms.ToolStripMenuItem? _scopeTodayMenuItem;
-    private System.Windows.Forms.ToolStripMenuItem? _opacity70MenuItem;
-    private System.Windows.Forms.ToolStripMenuItem? _opacity85MenuItem;
-    private System.Windows.Forms.ToolStripMenuItem? _opacity92MenuItem;
-    private System.Windows.Forms.ToolStripMenuItem? _opacity100MenuItem;
-    private System.Windows.Forms.ToolStripMenuItem? _maxItems5MenuItem;
-    private System.Windows.Forms.ToolStripMenuItem? _maxItems8MenuItem;
-    private System.Windows.Forms.ToolStripMenuItem? _maxItems12MenuItem;
-    private System.Windows.Forms.ToolStripMenuItem? _maxItems20MenuItem;
     private bool _isStopping;
     private bool _allowWindowClose;
     private bool _isStarted;
@@ -50,6 +46,7 @@ public sealed class HudController
         _todoRepository = new TodoRepository(_paths.TodosFile);
         _watcher = new TodoFileWatcher(_paths.RootDirectory, token => _todoRepository.LoadAsync(token), "todos.json");
         _windowHost = new HudWindowHost(_window);
+        _settingsWindow = new SettingsWindow();
 
         _window.AdvanceRequested += OnAdvanceRequested;
         _window.HideRequested += HideHud;
@@ -60,6 +57,15 @@ public sealed class HudController
         _todoRepository.DiagnosticError += OnRepositoryDiagnosticError;
         _watcher.DiagnosticError += OnDiagnosticError;
         _windowHost.DiagnosticError += OnDiagnosticError;
+        _settingsWindow.OpacityChanged += SetHudOpacity;
+        _settingsWindow.ScopeChanged += SetScope;
+        _settingsWindow.MaxItemsChanged += SetMaxItems;
+        _settingsWindow.TopmostChanged += SetTopmost;
+        _settingsWindow.HotKeyEnabledChanged += SetHudModeHotKeyEnabled;
+        _settingsWindow.HotKeyRecordingStarted += BeginHotKeyRecording;
+        _settingsWindow.HotKeyRecordingCancelled += CancelHotKeyRecording;
+        _settingsWindow.HotKeyCandidateSubmitted += SubmitHotKeyCandidate;
+        _settingsWindow.HotKeyClearRequested += ClearHudModeHotKeyShortcut;
     }
 
     public HudViewModel ViewModel => _window.ViewModel;
@@ -77,6 +83,8 @@ public sealed class HudController
         }
 
         PrepareWindowHandle();
+        _hotKeyService = new GlobalHotKeyService(_windowHost.Hwnd, ToggleInteractionMode);
+        RestoreHotKeyRegistration();
         ApplySettingsToWindow();
         await _todoRepository.LoadAsync(cancellationToken);
         try
@@ -136,12 +144,19 @@ public sealed class HudController
             SetDiagnostic(error);
         }
         await SaveSettingsSafeAsync(cancellationToken);
+        _settingsWindow.CloseForApplicationExit();
+        _hotKeyService?.Dispose();
+        _hotKeyService = null;
         if (_notifyIcon is not null)
         {
             _notifyIcon.Visible = false;
             _notifyIcon.Dispose();
             _notifyIcon = null;
         }
+        _notifyMenu?.Dispose();
+        _notifyMenu = null;
+        _trayIcon?.Dispose();
+        _trayIcon = null;
 
         _allowWindowClose = true;
         _windowHost.Dispose();
@@ -251,9 +266,71 @@ public sealed class HudController
     public void SetMaxItems(int maxItems)
     {
         if (_isStopping) return;
-        _settings.MaxItems = Math.Clamp(maxItems, 1, 100);
+        _settings.MaxItems = Math.Clamp(maxItems, 1, 20);
         RefreshView();
         UpdateMenuState();
+        _ = SaveSettingsSafeAsync();
+    }
+
+    public void ShowSettings()
+    {
+        if (_isStopping) return;
+        try
+        {
+            UpdateHotKeyPresentation();
+            _settingsWindow.ShowFor(_settings);
+        }
+        catch (Exception error)
+        {
+            SetDiagnostic(error);
+        }
+    }
+
+    public void SetHudModeHotKeyEnabled(bool enabled)
+    {
+        if (_isStopping) return;
+        _hotKeyMessage = null;
+        if (!enabled)
+        {
+            _hotKeyService?.Unregister();
+            _settings.HudModeHotKeyEnabled = false;
+            _hotKeySetupState = HotKeySetupState.Disabled;
+            UpdateHotKeyPresentation();
+            _ = SaveSettingsSafeAsync();
+            return;
+        }
+
+        if (_settings.HudModeHotKeyShortcut is null)
+        {
+            _hotKeySetupState = HotKeySetupState.PendingConfiguration;
+            UpdateHotKeyPresentation();
+            return;
+        }
+
+        try
+        {
+            _hotKeyService?.Register(_settings.HudModeHotKeyShortcut);
+            _settings.HudModeHotKeyEnabled = true;
+            _hotKeySetupState = HotKeySetupState.Registered;
+            _ = SaveSettingsSafeAsync();
+        }
+        catch (Exception error)
+        {
+            _hotKeySetupState = HotKeySetupState.Failure;
+            _hotKeyMessage = error.Message;
+        }
+        UpdateHotKeyPresentation();
+    }
+
+    public void ClearHudModeHotKeyShortcut()
+    {
+        if (_isStopping) return;
+        _hotKeyService?.Unregister();
+        _settings.HudModeHotKeyEnabled = false;
+        _settings.HudModeHotKeyShortcut = null;
+        _hotKeySetupState = HotKeySetupState.Disabled;
+        _hotKeyMessage = null;
+        UpdateHotKeyPresentation();
         _ = SaveSettingsSafeAsync();
     }
 
@@ -266,6 +343,128 @@ public sealed class HudController
 
         await StopAsync();
         Shutdown();
+    }
+
+    private void ToggleInteractionMode()
+    {
+        var nextMode = _settings.Mode == HudMode.Interactive ? HudMode.Passthrough : HudMode.Interactive;
+        SetInteractionMode(nextMode);
+    }
+
+    private void BeginHotKeyRecording()
+    {
+        _hotKeyMessage = null;
+        _hotKeyStateBeforeRecording = _hotKeySetupState;
+        _hotKeyService?.Unregister();
+        UpdateHotKeyPresentation();
+    }
+
+    private void CancelHotKeyRecording()
+    {
+        if (_hotKeyStateBeforeRecording is not { } previous)
+        {
+            return;
+        }
+
+        _hotKeyStateBeforeRecording = null;
+        if (previous == HotKeySetupState.Registered)
+        {
+            RestoreHotKeyRegistration();
+        }
+        else
+        {
+            _hotKeySetupState = previous;
+            UpdateHotKeyPresentation();
+        }
+    }
+
+    private void SubmitHotKeyCandidate(HotKeyShortcut candidate)
+    {
+        _hotKeyStateBeforeRecording = null;
+        var previousShortcut = _settings.HudModeHotKeyShortcut;
+        var wasEnabled = _settings.HudModeHotKeyEnabled;
+        try
+        {
+            _hotKeyService?.Register(candidate);
+            _settings.HudModeHotKeyShortcut = candidate;
+            _settings.HudModeHotKeyEnabled = true;
+            _hotKeySetupState = HotKeySetupState.Registered;
+            _hotKeyMessage = null;
+            _ = SaveSettingsSafeAsync();
+        }
+        catch (Exception error)
+        {
+            RestoreFailedHotKeyCandidate(candidate, error, previousShortcut, wasEnabled);
+        }
+        UpdateHotKeyPresentation();
+    }
+
+    private void RestoreFailedHotKeyCandidate(
+        HotKeyShortcut candidate,
+        Exception error,
+        HotKeyShortcut? previousShortcut,
+        bool wasEnabled)
+    {
+        if (wasEnabled && previousShortcut is not null)
+        {
+            try
+            {
+                _hotKeyService?.Register(previousShortcut);
+                _hotKeySetupState = HotKeySetupState.Registered;
+                _hotKeyMessage = $"“{candidate.DisplayName}”不可用（{error.Message}），已恢复原快捷键。";
+            }
+            catch
+            {
+                _hotKeySetupState = HotKeySetupState.Failure;
+                _hotKeyMessage = $"“{candidate.DisplayName}”不可用（{error.Message}），且原快捷键恢复失败。";
+            }
+            return;
+        }
+
+        _hotKeySetupState = HotKeySetupState.Failure;
+        _hotKeyMessage = error.Message;
+    }
+
+    private void RestoreHotKeyRegistration()
+    {
+        if (!_settings.HudModeHotKeyEnabled || _settings.HudModeHotKeyShortcut is null)
+        {
+            _hotKeySetupState = _settings.HudModeHotKeyEnabled
+                ? HotKeySetupState.PendingConfiguration
+                : HotKeySetupState.Disabled;
+            UpdateHotKeyPresentation();
+            return;
+        }
+        if (_hotKeyService?.RegisteredShortcut == _settings.HudModeHotKeyShortcut)
+        {
+            _hotKeySetupState = HotKeySetupState.Registered;
+            UpdateHotKeyPresentation();
+            return;
+        }
+
+        try
+        {
+            _hotKeyService?.Register(_settings.HudModeHotKeyShortcut);
+            _hotKeySetupState = HotKeySetupState.Registered;
+            _hotKeyMessage = null;
+        }
+        catch (Exception error)
+        {
+            _hotKeySetupState = HotKeySetupState.Failure;
+            _hotKeyMessage = error.Message;
+        }
+        UpdateHotKeyPresentation();
+    }
+
+    private void UpdateHotKeyPresentation()
+    {
+        var toggleOn = _hotKeySetupState is HotKeySetupState.PendingConfiguration or HotKeySetupState.Registered ||
+            _hotKeySetupState == HotKeySetupState.Failure && _settings.HudModeHotKeyEnabled;
+        _settingsWindow.ApplyHotKeyState(
+            toggleOn,
+            _settings.HudModeHotKeyShortcut,
+            _hotKeySetupState,
+            _hotKeyMessage);
     }
 
     private void PrepareWindowHandle()
@@ -455,63 +654,40 @@ public sealed class HudController
         };
         _modeMenuItem = new System.Windows.Forms.ToolStripMenuItem("交互模式") { CheckOnClick = true };
         _modeMenuItem.Click += (_, _) => SetInteractionMode(_modeMenuItem.Checked ? HudMode.Interactive : HudMode.Passthrough);
-        _topmostMenuItem = new System.Windows.Forms.ToolStripMenuItem("始终置顶") { CheckOnClick = true };
-        _topmostMenuItem.Click += (_, _) => SetTopmost(_topmostMenuItem.Checked);
-
-        var scopeMenu = new System.Windows.Forms.ToolStripMenuItem("任务范围");
-        _scopeAllMenuItem = new System.Windows.Forms.ToolStripMenuItem("全部") { CheckOnClick = true };
-        _scopeAllMenuItem.Click += (_, _) => SetScope(HudScope.All);
-        _scopeTodayMenuItem = new System.Windows.Forms.ToolStripMenuItem("今天") { CheckOnClick = true };
-        _scopeTodayMenuItem.Click += (_, _) => SetScope(HudScope.Today);
-        scopeMenu.DropDownItems.Add(_scopeAllMenuItem);
-        scopeMenu.DropDownItems.Add(_scopeTodayMenuItem);
-
-        var opacityMenu = new System.Windows.Forms.ToolStripMenuItem("透明度");
-        _opacity70MenuItem = new System.Windows.Forms.ToolStripMenuItem("70%") { CheckOnClick = true };
-        _opacity70MenuItem.Click += (_, _) => SetHudOpacity(0.70);
-        _opacity85MenuItem = new System.Windows.Forms.ToolStripMenuItem("85%") { CheckOnClick = true };
-        _opacity85MenuItem.Click += (_, _) => SetHudOpacity(0.85);
-        _opacity92MenuItem = new System.Windows.Forms.ToolStripMenuItem("92%") { CheckOnClick = true };
-        _opacity92MenuItem.Click += (_, _) => SetHudOpacity(0.92);
-        _opacity100MenuItem = new System.Windows.Forms.ToolStripMenuItem("100%") { CheckOnClick = true };
-        _opacity100MenuItem.Click += (_, _) => SetHudOpacity(1.0);
-        opacityMenu.DropDownItems.Add(_opacity70MenuItem);
-        opacityMenu.DropDownItems.Add(_opacity85MenuItem);
-        opacityMenu.DropDownItems.Add(_opacity92MenuItem);
-        opacityMenu.DropDownItems.Add(_opacity100MenuItem);
-
-        var maxItemsMenu = new System.Windows.Forms.ToolStripMenuItem("最多任务数");
-        _maxItems5MenuItem = new System.Windows.Forms.ToolStripMenuItem("5") { CheckOnClick = true };
-        _maxItems5MenuItem.Click += (_, _) => SetMaxItems(5);
-        _maxItems8MenuItem = new System.Windows.Forms.ToolStripMenuItem("8") { CheckOnClick = true };
-        _maxItems8MenuItem.Click += (_, _) => SetMaxItems(8);
-        _maxItems12MenuItem = new System.Windows.Forms.ToolStripMenuItem("12") { CheckOnClick = true };
-        _maxItems12MenuItem.Click += (_, _) => SetMaxItems(12);
-        _maxItems20MenuItem = new System.Windows.Forms.ToolStripMenuItem("20") { CheckOnClick = true };
-        _maxItems20MenuItem.Click += (_, _) => SetMaxItems(20);
-        maxItemsMenu.DropDownItems.Add(_maxItems5MenuItem);
-        maxItemsMenu.DropDownItems.Add(_maxItems8MenuItem);
-        maxItemsMenu.DropDownItems.Add(_maxItems12MenuItem);
-        maxItemsMenu.DropDownItems.Add(_maxItems20MenuItem);
-
+        var settingsItem = new System.Windows.Forms.ToolStripMenuItem("设置…");
+        settingsItem.Click += (_, _) => ShowSettings();
         var exitItem = new System.Windows.Forms.ToolStripMenuItem("退出 GhostPin");
         exitItem.Click += async (_, _) => await ExitAsync();
         menu.Items.Add(_visibilityMenuItem);
         menu.Items.Add(_modeMenuItem);
-        menu.Items.Add(_topmostMenuItem);
-        menu.Items.Add(scopeMenu);
-        menu.Items.Add(opacityMenu);
-        menu.Items.Add(maxItemsMenu);
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        menu.Items.Add(settingsItem);
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add(exitItem);
 
-        _notifyIcon = new System.Windows.Forms.NotifyIcon
+        var icon = TrayIconLoader.Load(new Uri(
+            "/GhostPin.Windows.App;component/Assets/GhostPinStatusBar.png",
+            UriKind.Relative));
+        var notifyIcon = new System.Windows.Forms.NotifyIcon
         {
-            Icon = System.Drawing.SystemIcons.Application,
+            Icon = icon,
             Text = "GhostPin",
-            ContextMenuStrip = menu,
-            Visible = true
+            ContextMenuStrip = menu
         };
+        try
+        {
+            notifyIcon.Visible = true;
+            _trayIcon = icon;
+            _notifyMenu = menu;
+            _notifyIcon = notifyIcon;
+        }
+        catch
+        {
+            notifyIcon.Dispose();
+            menu.Dispose();
+            icon.Dispose();
+            throw;
+        }
     }
 
     private void UpdateMenuState()
@@ -524,17 +700,8 @@ public sealed class HudController
 
         if (_visibilityMenuItem is not null) _visibilityMenuItem.Text = _settings.IsVisible ? "隐藏 HUD" : "显示 HUD";
         if (_modeMenuItem is not null) _modeMenuItem.Checked = _settings.Mode == HudMode.Interactive;
-        if (_topmostMenuItem is not null) _topmostMenuItem.Checked = _settings.IsTopmost;
-        if (_scopeAllMenuItem is not null) _scopeAllMenuItem.Checked = _settings.Scope == HudScope.All;
-        if (_scopeTodayMenuItem is not null) _scopeTodayMenuItem.Checked = _settings.Scope == HudScope.Today;
-        if (_opacity70MenuItem is not null) _opacity70MenuItem.Checked = _settings.Opacity == 0.70;
-        if (_opacity85MenuItem is not null) _opacity85MenuItem.Checked = _settings.Opacity == 0.85;
-        if (_opacity92MenuItem is not null) _opacity92MenuItem.Checked = _settings.Opacity == 0.92;
-        if (_opacity100MenuItem is not null) _opacity100MenuItem.Checked = _settings.Opacity == 1.0;
-        if (_maxItems5MenuItem is not null) _maxItems5MenuItem.Checked = _settings.MaxItems == 5;
-        if (_maxItems8MenuItem is not null) _maxItems8MenuItem.Checked = _settings.MaxItems == 8;
-        if (_maxItems12MenuItem is not null) _maxItems12MenuItem.Checked = _settings.MaxItems == 12;
-        if (_maxItems20MenuItem is not null) _maxItems20MenuItem.Checked = _settings.MaxItems == 20;
+        _settingsWindow.ApplySettings(_settings);
+        UpdateHotKeyPresentation();
     }
 
     private void Shutdown()

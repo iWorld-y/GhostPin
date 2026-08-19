@@ -72,7 +72,7 @@ HUD 默认 SHALL 处于穿透模式，穿透模式下鼠标事件 MUST 传递给
 - **THEN** HUD 保留最后一次成功加载的任务列表、报告可诊断错误且不退出
 
 ### Requirement: Windows HUD 任务投影
-HUD SHALL 只展示 Todo 与 Doing 任务，并 SHALL 将 Doing 分区置于 Todo 分区上方且隐藏空分区。系统 SHALL 支持“全部未完成”和“今天新增”两种范围以及可配置的条数上限；相同任务数据和时间输入在 Windows 与现有 GhostPin 中 MUST 产生一致的分区、优先级、截止时间、逾期状态及创建时间排序和截断结果。
+HUD SHALL 只展示 Todo 与 Doing 任务，并 SHALL 将 Doing 分区置于 Todo 分区上方且隐藏空分区。系统 SHALL 支持“全部未完成”和“今天新增”两种范围以及 1 至 20 的可配置条数上限；相同任务数据和时间输入在 Windows 与现有 GhostPin 中 MUST 产生一致的分区、优先级、截止时间、逾期状态及创建时间排序和截断结果。
 
 #### Scenario: 同时存在 Doing 与 Todo
 - **WHEN** 当前范围同时包含 Doing 与 Todo 任务
@@ -117,7 +117,7 @@ HUD SHALL 只展示 Todo 与 Doing 任务，并 SHALL 将 Doing 分区置于 Tod
 - **THEN** 其他应用保持前台和键盘焦点，HUD 仅更新自身内容
 
 ### Requirement: Windows HUD 偏好持久化
-系统 SHALL 将 HUD 的显示状态、窗口位置与尺寸、透明度、置顶开关、穿透或交互模式、显示范围和条数上限持久化到任务文件之外的 Windows 本地设置，并 SHALL 在下次启动时恢复。首次启动 MUST 使用穿透模式、置顶开启和 0.5 至 1.0 范围内的默认透明度。
+系统 SHALL 将 HUD 的显示状态、窗口位置与尺寸、透明度、置顶开关、穿透或交互模式、显示范围、条数上限以及已成功注册的可选全局快捷键持久化到任务文件之外的 Windows 本地设置，并 SHALL 在下次启动时恢复。首次启动 MUST 使用穿透模式、置顶开启和 0.5 至 1.0 范围内的默认透明度。
 
 #### Scenario: 重启恢复 HUD 状态
 - **WHEN** 用户修改 HUD 位置、尺寸、透明度、置顶、模式、范围或条数上限后重启应用
@@ -131,6 +131,47 @@ HUD SHALL 只展示 Todo 与 Doing 任务，并 SHALL 将 Doing 分区置于 Tod
 - **WHEN** Windows HUD 设置文件无法解析或包含越界值
 - **THEN** 系统对无效项使用安全默认值且任务数据不受影响
 
+### Requirement: Windows 设置窗口
+系统 SHALL 提供与 macOS 基本结构一致的独立设置窗口，并 SHALL 包含“HUD”和“高级”两个页签。HUD 页 SHALL 集中调整透明度、显示范围、条数上限和置顶开关，高级页 SHALL 配置可选全局快捷键；通知区域菜单 SHALL 只保留常驻高频操作和设置窗口入口。设置窗口 MUST 复用当前 HUD 状态，修改后 SHALL 立即更新 HUD 并持久化，且重复打开 MUST 复用同一个窗口实例。
+
+#### Scenario: 从通知区域打开设置
+- **WHEN** 用户在通知区域菜单选择“设置…”
+- **THEN** 系统显示并激活单一设置窗口，窗口反映当前 HUD 透明度、显示范围、条数上限和置顶状态
+
+#### Scenario: 修改 HUD 设置
+- **WHEN** 用户在设置窗口调整任一支持的 HUD 设置
+- **THEN** HUD 立即应用该值、设置写入独立设置文件，通知区域状态与设置窗口保持一致
+
+#### Scenario: 关闭并重新打开设置
+- **WHEN** 用户关闭设置窗口后再次从通知区域打开
+- **THEN** 系统复用设置窗口生命周期并显示最新的当前值，不创建重复窗口
+
+### Requirement: Windows 全局交互快捷键
+系统 SHALL 允许用户在设置窗口高级页选择性启用并录制一个全局快捷键，用于切换 HUD 的穿透与交互模式。普通按键候选 MUST 至少包含 Ctrl、Alt、Shift 或 Win 中的一个修饰键，F1 至 F20 MAY 单独使用，单独修饰键 MUST NOT 成为候选，Esc SHALL 取消录制。快捷键及启用状态 MUST 仅在系统成功注册后持久化；候选被占用或注册失败时系统 MUST 保留原设置，并在原快捷键此前启用时尝试恢复注册。
+
+#### Scenario: 首次启用并录制快捷键
+- **WHEN** 用户打开全局快捷键开关但尚未设置组合
+- **THEN** 系统进入待配置状态且不持久化启用状态，直至用户录制的候选成功注册
+
+#### Scenario: 快捷键切换交互模式
+- **WHEN** 已注册的全局快捷键被按下
+- **THEN** 系统只在穿透与交互模式之间切换 HUD，并同步通知区域及设置状态
+
+#### Scenario: 新候选注册冲突
+- **WHEN** 用户替换已启用快捷键且新候选无法注册
+- **THEN** 系统显示冲突原因、不保存新候选，并恢复此前已注册的快捷键
+
+#### Scenario: 取消或清除快捷键
+- **WHEN** 用户在录制时按 Esc 或选择清除快捷键
+- **THEN** Esc 恢复录制前状态；清除操作注销快捷键、关闭启用状态并移除持久化组合
+
+### Requirement: Windows 与 macOS 色调一致
+Windows HUD SHALL 沿用 macOS HUD 的浅色白色材质、绿色与黄色半透明渐变、深色主文字和灰色次要文字层级；设置窗口 SHALL 使用浅色系统背景、白色分组内容和标准控件层级。HUD 和设置窗口 MUST NOT 默认呈现为固定黑色主题。
+
+#### Scenario: 打开 HUD 与设置窗口
+- **WHEN** 用户在默认外观下启动 Windows HUD 并打开设置窗口
+- **THEN** 两个窗口呈现与 macOS GhostPin 一致方向的浅色白绿黄层级，而不是黑色面板
+
 ### Requirement: 多显示器与 DPI 适配
 系统 SHALL 在 Windows Per-Monitor DPI 环境下保持 HUD 内容清晰，并 SHALL 在窗口跨越不同缩放比例的显示器时更新布局和窗口尺寸。恢复已保存窗口时，系统 MUST 检查其是否与任一当前显示器工作区相交；完全离屏的窗口 SHALL 回到当前主显示器的可见区域。
 
@@ -143,7 +184,11 @@ HUD SHALL 只展示 Todo 与 Doing 任务，并 SHALL 将 Doing 分区置于 Tod
 - **THEN** HUD 在主显示器可见区域内恢复，并保留合法尺寸或将其限制到可用范围
 
 ### Requirement: 通知区域控制
-通知区域菜单 SHALL 提供显示或隐藏 HUD、切换交互模式和退出应用的入口，且菜单状态 SHALL 与当前 HUD 可见性及交互模式保持一致。
+通知区域菜单 SHALL 提供显示或隐藏 HUD、切换交互模式、打开设置窗口和退出应用的入口，且菜单状态 SHALL 与当前 HUD 可见性及交互模式保持一致。通知区域图标 MUST 使用与 macOS 状态栏相同的 `GhostPinStatusBar` 图像资源，不得使用通用应用占位图标。
+
+#### Scenario: 显示 GhostPin 通知区域图标
+- **WHEN** Windows 版 GhostPin 创建通知区域入口
+- **THEN** 通知区域显示由 `GhostPinStatusBar` 资源生成的 GhostPin 图标，而不是系统通用应用图标
 
 #### Scenario: 从通知区域显示 HUD
 - **WHEN** HUD 已隐藏且用户选择显示入口
