@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <RootNamespace>GhostPin.Windows.App</RootNamespace>
+    <AssemblyName>GhostPin.Windows.App</AssemblyName>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <LangVersion>latest</LangVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>AnyCPU;x64</Platforms>
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GhostPin.Windows.Core\GhostPin.Windows.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="..\..\..\Sources\GhostPin\Resources\Logo\GhostPinLogo.png">
+      <Link>Assets\GhostPinLogo.png</Link>
+    </Resource>
+    <Resource Include="..\..\..\Sources\GhostPin\Resources\Logo\GhostPinStatusBar.png">
+      <Link>Assets\GhostPinStatusBar.png</Link>
+    </Resource>
+  </ItemGroup>
+</Project>

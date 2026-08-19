@@ -1,0 +1,25 @@
+[
+  {
+    "id": "00000000-0000-0000-0000-000000000001",
+    "title": "处理高优先级任务",
+    "createdAt": "2026-08-19T09:00:00+08:00",
+    "status": "doing",
+    "completedAt": null,
+    "reminderAt": null,
+    "reminderSentAt": null,
+    "priority": "high",
+    "dueAt": "2026-08-19T18:00:00+08:00",
+    "description": "来自 Swift GhostPin 的共享 fixture",
+    "isCompleted": false,
+    "futureField": "must be ignored"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000002",
+    "title": "逾期低优先级任务",
+    "createdAt": "2026-08-18T09:00:00+08:00",
+    "status": "todo",
+    "completedAt": null,
+    "priority": "low",
+    "dueAt": "2026-08-18T18:00:00+08:00"
+  }
+]

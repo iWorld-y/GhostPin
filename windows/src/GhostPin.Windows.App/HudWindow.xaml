@@ -1,0 +1,214 @@
+<Window x:Class="GhostPin.Windows.App.HudWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="GhostPin"
+        Width="380"
+        Height="520"
+        MinWidth="310"
+        MinHeight="300"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        WindowStartupLocation="Manual">
+    <Window.Resources>
+        <Style x:Key="TaskTitle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#FF20231F" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsOverdue}" Value="True">
+                    <Setter Property="Foreground" Value="#FFBB3030" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="TaskDue" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#FF6A7169" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsOverdue}" Value="True">
+                    <Setter Property="Foreground" Value="#FFBB3030" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="GhostButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#FF20231F" />
+            <Setter Property="Background" Value="#AFFFFFFF" />
+            <Setter Property="BorderBrush" Value="#B8FFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="AdvanceButton" TargetType="Button" BasedOn="{StaticResource GhostButton}">
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="FontSize" Value="22" />
+            <Setter Property="Foreground" Value="#FFC47B16" />
+            <Setter Property="BorderBrush" Value="#88D9972E" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid Width="{TemplateBinding Width}" Height="{TemplateBinding Height}">
+                            <Ellipse Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}" StrokeThickness="1" />
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <Grid x:Name="Root" PreviewMouseLeftButtonDown="OnRootMouseLeftButtonDown">
+        <Border x:Name="DragSurface" Background="Transparent" Panel.ZIndex="0" />
+        <Border Panel.ZIndex="1" Margin="8" CornerRadius="26" Padding="16" BorderThickness="1">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="BorderBrush" Value="#B8FFFFFF" />
+                    <Setter Property="Opacity" Value="0.92" />
+                    <Setter Property="Background">
+                        <Setter.Value>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                <GradientStop Color="#F4FFFFFF" Offset="0" />
+                                <GradientStop Color="#EEDCEBD5" Offset="0.58" />
+                                <GradientStop Color="#EEF7E3B4" Offset="1" />
+                            </LinearGradientBrush>
+                        </Setter.Value>
+                    </Setter>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsInteractive}" Value="True">
+                            <Setter Property="BorderBrush" Value="#B8E1A13A" />
+                            <DataTrigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.18" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </DataTrigger.EnterActions>
+                            <DataTrigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0.92" Duration="0:0:0.18" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </DataTrigger.ExitActions>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="22" ShadowDepth="8" Opacity="0.18" Color="#000000" />
+            </Border.Effect>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0" Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Image Grid.Column="0" Width="34" Height="34" Margin="0,0,10,0"
+                           Source="/GhostPin.Windows.App;component/Assets/GhostPinLogo.png" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="GhostPin" Foreground="#FF20231F" FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Count, StringFormat={}{0} 个未完成}"
+                                   Foreground="#FF6A7169" FontSize="11" />
+                    </StackPanel>
+                    <Button Grid.Column="2" Content="×" Style="{StaticResource GhostButton}"
+                            Visibility="{Binding CloseVisibility}" Click="OnCloseClick" ToolTip="隐藏桌面便签" />
+                </Grid>
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel>
+                        <TextBlock Text="DOING" Foreground="#FFC47B16" FontSize="11" FontWeight="SemiBold"
+                                   Margin="0,0,0,6" Visibility="{Binding HasDoingItems, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <ItemsControl ItemsSource="{Binding DoingItems}" Margin="0,0,0,8">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,0,0,8" Padding="11" CornerRadius="16" BorderThickness="1"
+                                            BorderBrush="#D8FFFFFF" Background="#BFFFFFFF">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="30" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button Grid.Column="0" Content="○" Style="{StaticResource AdvanceButton}"
+                                                    Tag="{Binding}" Click="OnAdvanceClick" ToolTip="标记完成" />
+                                            <StackPanel Grid.Column="1" Margin="9,0,0,0">
+                                                <TextBlock Text="{Binding Title}" Style="{StaticResource TaskTitle}" FontSize="14" FontWeight="SemiBold"
+                                                           TextWrapping="Wrap" MaxHeight="54" />
+                                                <TextBlock Text="{Binding Description}" Foreground="#FF6A7169" FontSize="11"
+                                                           TextWrapping="Wrap" MaxHeight="32" Margin="0,5,0,0"
+                                                           Visibility="{Binding HasDescription, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                                                    <TextBlock Text="{Binding PriorityText}" Foreground="#FFC47B16" FontSize="10" />
+                                                    <TextBlock Text="  ·  " Foreground="#FF9BA19A" FontSize="10" Visibility="{Binding HasDueDate, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                    <TextBlock Text="{Binding DueText}" Style="{StaticResource TaskDue}" FontSize="10" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="TODO" Foreground="#FF6A7169" FontSize="11" FontWeight="SemiBold"
+                                   Margin="0,2,0,6" Visibility="{Binding HasTodoItems, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <ItemsControl ItemsSource="{Binding TodoItems}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,0,0,8" Padding="11" CornerRadius="16" BorderThickness="1"
+                                            BorderBrush="#C8FFFFFF" Background="#A8FFFFFF">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="30" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button Grid.Column="0" Content="○" Style="{StaticResource AdvanceButton}"
+                                                    Tag="{Binding}" Click="OnAdvanceClick" ToolTip="开始处理" />
+                                            <StackPanel Grid.Column="1" Margin="9,0,0,0">
+                                                <TextBlock Text="{Binding Title}" Style="{StaticResource TaskTitle}" FontSize="14" FontWeight="SemiBold"
+                                                           TextWrapping="Wrap" MaxHeight="54" />
+                                                <TextBlock Text="{Binding Description}" Foreground="#FF6A7169" FontSize="11"
+                                                           TextWrapping="Wrap" MaxHeight="32" Margin="0,5,0,0"
+                                                           Visibility="{Binding HasDescription, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                                                    <TextBlock Text="{Binding PriorityText}" Foreground="#FFC47B16" FontSize="10" />
+                                                    <TextBlock Text="  ·  " Foreground="#FF9BA19A" FontSize="10" Visibility="{Binding HasDueDate, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                    <TextBlock Text="{Binding DueText}" Style="{StaticResource TaskDue}" FontSize="10" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <StackPanel HorizontalAlignment="Center" Margin="0,36,0,36"
+                                    Visibility="{Binding IsEmpty, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="✓" Foreground="#FF6A7169" FontSize="28" HorizontalAlignment="Center" />
+                            <TextBlock Text="没有未完成待办" Foreground="#FF6A7169" FontSize="13" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+                <TextBlock Grid.Row="2" Text="{Binding ModeHint}" Foreground="#FF777F76" FontSize="10" HorizontalAlignment="Left" Margin="0,8,0,0" />
+                <TextBlock Grid.Row="2" Text="{Binding AdvanceMessage}" Foreground="#FFC47B16" FontSize="10" HorizontalAlignment="Center" Margin="0,8,0,0"
+                           Visibility="{Binding HasAdvanceMessage, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <TextBlock Grid.Row="2" Text="{Binding DiagnosticMessage}" Foreground="#FFBB3030" FontSize="10" HorizontalAlignment="Right" Margin="0,8,0,0"
+                           Visibility="{Binding HasDiagnosticMessage, Converter={StaticResource BooleanToVisibilityConverter}}" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
