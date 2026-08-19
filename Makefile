@@ -10,8 +10,11 @@ NUGET_AUDIT ?= false
 ifeq ($(OS),Windows_NT)
 HOST_PLATFORM := windows
 SHELL := cmd.exe
-else
+else ifeq ($(shell uname -s),Darwin)
 HOST_PLATFORM := macos
+SHELL := /bin/bash
+else
+HOST_PLATFORM := unsupported
 SHELL := /bin/bash
 endif
 
@@ -47,8 +50,6 @@ dmg: ## 构建并校验 DMG
 
 release: ## 发布新版本(先修改 script/VERSION 与 CHANGELOG,再执行)
 
-package: dmg ## dmg 的别名
-
 ifeq ($(HOST_PLATFORM),windows)
 
 help:
@@ -59,6 +60,7 @@ help:
 	@echo make build        构建 Windows solution
 	@echo make test         运行 Windows 自动测试
 	@echo make verify       构建、启动并验证 App 进程
+	@echo make package      打包 Windows x64 自包含单文件 EXE
 	@echo 可通过 CONFIGURATION=Release 切换构建配置
 
 start: stop
@@ -80,11 +82,14 @@ test:
 verify: start
 	@powershell -NoProfile -Command "$$deadline = (Get-Date).AddSeconds(5); do { if (Get-Process -Name '$(WINDOWS_APP_NAME)' -ErrorAction SilentlyContinue) { exit 0 }; Start-Sleep -Milliseconds 500 } while ((Get-Date) -lt $$deadline); exit 1"
 
+package:
+	@powershell -NoProfile -ExecutionPolicy Bypass -File script/package_windows.ps1
+
 logs telemetry cli dmg release:
 	@echo $@ 仅支持 macOS；Windows MVP 暂未提供该能力。
 	@exit 2
 
-else
+else ifeq ($(HOST_PLATFORM),macos)
 
 help:
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_.-]+:.*## / {printf "\033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -124,7 +129,18 @@ cli:
 dmg:
 	@./script/package_dmg.sh
 
+package: dmg ## 构建当前平台发布包
+
 release:
 	@./script/release.sh
+
+else
+
+help:
+	@echo GhostPin 不支持在当前平台执行构建与打包，请使用 macOS 或 Windows。
+
+build test verify package:
+	@echo "错误: 当前平台不支持 GhostPin 的构建与打包。" >&2
+	@exit 2
 
 endif

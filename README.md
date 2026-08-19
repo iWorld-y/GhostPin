@@ -6,7 +6,7 @@
 
 **中文** · [English](README.en.md)
 
-GhostPin 是一个 **Agent native** 的本地优先 macOS 菜单栏待办应用（SwiftUI + Swift Package Manager）：任务由 Agent 通过随应用分发的命令行工具管理，应用本身负责展示桌面幽灵 HUD、文件监听和本地通知。纯本地存储，无云同步。最低支持 macOS 14，工具链为 Swift 6。
+GhostPin 是一个 **Agent native** 的本地优先 macOS 菜单栏待办应用，同时提供 WPF + Win32 的 Windows 版本。macOS 任务由 Agent 通过随应用分发的命令行工具管理，应用本身负责展示桌面幽灵 HUD、文件监听和本地通知。纯本地存储，无云同步。macOS 最低支持 14，工具链为 Swift 6。
 
 ## 设计理念：Agent Native
 
@@ -45,9 +45,12 @@ GhostPin 采用本地优先设计。
 
 ## 安装
 
-从 GitHub Releases 页面下载最新的 GhostPin-<版本号>.dmg，打开后把 GhostPin.app 拖入 Applications。
+从 GitHub Releases 页面按平台下载最新版本：
 
-当前公开发布为 ad-hoc 签名，macOS 门禁可能提示“无法验证开发者”。
+- macOS：`GhostPin-<版本号>.dmg`，打开后把 GhostPin.app 拖入 Applications。
+- Windows 11 x64：`GhostPin-<版本号>-windows-x64.exe`，这是自包含单文件，直接下载运行，无需安装 .NET 或解压。
+
+当前 macOS 公开发布为 ad-hoc 签名，macOS 门禁可能提示“无法验证开发者”；Windows EXE 当前未配置 Authenticode 签名，Windows SmartScreen 可能显示安全提示。
 
 ## 命令行工具
 
@@ -92,11 +95,16 @@ ghostpin-cli 随应用安装在 App Bundle 内。用户向 Skill 使用固定完
 
 ## 从源码构建
 
-环境要求：
+macOS 环境要求：
 
 - macOS 14 或更高
 - Xcode 命令行工具
 - Swift Package Manager
+
+Windows 环境要求：
+
+- Windows 11 x64
+- .NET 10 SDK（包含 Windows Desktop SDK）
 
 日常开发建议使用 Makefile：
 
@@ -108,6 +116,7 @@ make stop                 # 停止 App
 make logs                 # 启动 App 并跟踪日志
 make test                 # 运行核心行为检查
 make cli ARGS='list --json' # 执行开发版 CLI
+make package              # 根据平台生成 DMG 或 Windows 单文件 EXE
 ```
 
 也可以直接使用底层脚本：
@@ -117,9 +126,11 @@ swift build
 swift run GhostPinCoreChecks
 ./script/build_and_run.sh --verify
 ./script/package_dmg.sh
+# Windows：PowerShell
+./script/package_windows.ps1
 ```
 
-正式版本发布由 GitHub Actions 在 macOS runner 上完成。发布前只修改 script/VERSION，然后执行：
+`make package` 会自动识别当前平台：macOS 生成 `GhostPin-<版本号>.dmg`，Windows 生成 `GhostPin-<版本号>-windows-x64.exe`。正式版本发布由 GitHub Actions 在 macOS 与 Windows runner 上完成；发布前只修改 script/VERSION，然后执行：
 
 ```bash
 bash script/release.sh
@@ -139,7 +150,8 @@ Sources/GhostPinCore/         待办、提醒、解析与存储的核心逻辑
 Sources/GhostPinCLI/          ghostpin-cli 命令行工具
 Sources/GhostPin/Resources/   应用图标与 Logo
 Tests/GhostPinCoreChecks/     可执行核心行为检查
-script/                      应用打包与 DMG 脚本
+windows/src/                 Windows WPF + Win32 应用与核心逻辑
+script/                      应用打包与发布脚本
 ```
 
 ## 许可证

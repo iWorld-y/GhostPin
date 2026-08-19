@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 一键发布 GhostPin:提交版本号 → 同步 main → 推送 tag → 触发 GitHub Actions 发布。
+# 一键发布 GhostPin:提交版本号 → 同步 main → 推送 tag → 触发 GitHub Actions 跨平台发布。
 # 用法: 先手动修改 script/VERSION 为最新版本号,然后执行 `bash script/release.sh`。
 set -euo pipefail
 
@@ -70,9 +70,9 @@ else
   git pull origin main
 fi
 
-# 5. 打 tag 并推送,由 GitHub Actions 负责构建 DMG 和创建 Release
+# 5. 打 tag 并推送,由 GitHub Actions 负责构建 macOS DMG、Windows x64 EXE 和创建 Release
 git tag "$TAG"
 git push origin "$TAG"
 
 echo ">>> 已推送 tag: $TAG"
-echo ">>> GitHub Actions 将自动构建 DMG 并创建 Release"
+echo ">>> GitHub Actions 将自动构建 macOS DMG 与 Windows x64 EXE,并创建 Release"
