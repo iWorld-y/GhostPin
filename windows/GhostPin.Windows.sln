@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GhostPin.Windows.Core", "src\GhostPin.Windows.Core\GhostPin.Windows.Core.csproj", "{5B6BD3AE-8B9F-4E6D-9A0B-2FC1E7D1F1A1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GhostPin.Windows.App", "src\GhostPin.Windows.App\GhostPin.Windows.App.csproj", "{1D8E9658-7D0E-4BE3-9F8A-8C5EF3A5B8D2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GhostPin.Windows.Core.Tests", "tests\GhostPin.Windows.Core.Tests\GhostPin.Windows.Core.Tests.csproj", "{D7D8A8E4-63FE-4C17-AC31-3B1A8D79CB43}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{5B6BD3AE-8B9F-4E6D-9A0B-2FC1E7D1F1A1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5B6BD3AE-8B9F-4E6D-9A0B-2FC1E7D1F1A1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5B6BD3AE-8B9F-4E6D-9A0B-2FC1E7D1F1A1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5B6BD3AE-8B9F-4E6D-9A0B-2FC1E7D1F1A1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1D8E9658-7D0E-4BE3-9F8A-8C5EF3A5B8D2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1D8E9658-7D0E-4BE3-9F8A-8C5EF3A5B8D2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1D8E9658-7D0E-4BE3-9F8A-8C5EF3A5B8D2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1D8E9658-7D0E-4BE3-9F8A-8C5EF3A5B8D2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D7D8A8E4-63FE-4C17-AC31-3B1A8D79CB43}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D7D8A8E4-63FE-4C17-AC31-3B1A8D79CB43}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D7D8A8E4-63FE-4C17-AC31-3B1A8D79CB43}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D7D8A8E4-63FE-4C17-AC31-3B1A8D79CB43}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
