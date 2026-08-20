@@ -17,30 +17,36 @@ echo ">>> 发布版本: $VERSION (tag: $TAG)"
 
 # 2. 工作区必须干净,但允许 script/VERSION 作为本次发布的版本输入
 dirty_paths=()
+has_dirty_paths=false
 version_file_dirty=false
 while IFS= read -r status_line; do
   [[ -z "$status_line" ]] && continue
   path="${status_line:3}"
   dirty_paths+=("$path")
+  has_dirty_paths=true
   if [[ "$path" == "script/VERSION" ]]; then
     version_file_dirty=true
   fi
 done < <(git status --porcelain=v1 --untracked-files=all)
 
 unexpected_dirty_paths=()
-for path in "${dirty_paths[@]}"; do
-  if [[ "$path" != "script/VERSION" ]]; then
-    unexpected_dirty_paths+=("$path")
-  fi
-done
+has_unexpected_dirty_paths=false
+if [[ "$has_dirty_paths" == true ]]; then
+  for path in "${dirty_paths[@]}"; do
+    if [[ "$path" != "script/VERSION" ]]; then
+      unexpected_dirty_paths+=("$path")
+      has_unexpected_dirty_paths=true
+    fi
+  done
+fi
 
-if ((${#unexpected_dirty_paths[@]} > 0)); then
+if [[ "$has_unexpected_dirty_paths" == true ]]; then
   echo "错误: 工作区有未提交改动,仅允许 script/VERSION 作为发布版本输入:" >&2
   printf '  %s\n' "${unexpected_dirty_paths[@]}" >&2
   exit 1
 fi
 
-if ((${#dirty_paths[@]} > 0)); then
+if [[ "$has_dirty_paths" == true ]]; then
   echo ">>> 检测到仅 script/VERSION 改动,将自动提交并推送版本号"
 fi
 
