@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.1.0 - 2026-08-20
+
+### Added
+
+- 新增 Windows 原生版本，使用 C# WPF 与 Win32 实现桌面幽灵 HUD、托盘菜单和设置窗口。
+- Windows HUD 支持穿透/交互模式、任务状态推进、显示范围与屏幕位置设置，以及可选全局快捷键。
+- GitHub Release 同时提供 macOS DMG 与 Windows x64 单文件 EXE，可直接下载运行。
+
+### Changed
+
+- `make build`、`make test`、`make package` 等现有入口会自动识别 macOS 与 Windows 平台。
+- 设置页面与 HUD 的基础交互、色调和托盘图标在 macOS 与 Windows 间保持一致。
+
 ## v1.0.2 - 2026-08-18
 
 ### Changed
