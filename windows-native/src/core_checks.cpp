@@ -332,10 +332,10 @@ int main() {
     settings.placement.logical_height = 5000;
     settings.placement.dpi = 1;
     settings = normalize(settings);
-    if (!expect(settings.opacity == 0.92 && settings.max_items == 8,
+    if (!expect(settings.opacity == 1.0 && settings.max_items == 8,
         "settings scalar normalization", checks)) return 1;
     if (!expect(!settings.hotkey_enabled && settings.placement.logical_width == 360 &&
-        settings.placement.logical_height == 520 && settings.placement.dpi == 96 &&
+        settings.placement.logical_height == 460 && settings.placement.dpi == 96 &&
         settings.hotkey_modifiers == 0 && settings.hotkey_key == 0,
         "settings invalid values fallback", checks)) return 1;
     HudSettings scalar_boundaries;
@@ -351,12 +351,12 @@ int main() {
         "settings upper scalar boundaries are preserved", checks)) return 1;
     scalar_boundaries.opacity = 0.499;
     scalar_boundaries.max_items = 21;
-    if (!expect(normalize(scalar_boundaries).opacity == 0.92 &&
+    if (!expect(normalize(scalar_boundaries).opacity == 1.0 &&
         normalize(scalar_boundaries).max_items == 8,
         "settings out of range scalars fall back independently", checks)) return 1;
     scalar_boundaries.opacity = std::numeric_limits<double>::infinity();
     scalar_boundaries.max_items = std::numeric_limits<int>::min();
-    if (!expect(normalize(scalar_boundaries).opacity == 0.92 &&
+    if (!expect(normalize(scalar_boundaries).opacity == 1.0 &&
         normalize(scalar_boundaries).max_items == 8,
         "settings non-finite and extreme scalars fall back", checks)) return 1;
     HudSettings default_settings;
@@ -411,12 +411,12 @@ int main() {
     Placement boundary;
     boundary.relative_x = -24;
     boundary.relative_y = -12;
-    boundary.logical_width = 310;
-    boundary.logical_height = 300;
+    boundary.logical_width = 300;
+    boundary.logical_height = 280;
     boundary.dpi = 48;
     const auto normalized_boundary = normalize(boundary);
     if (!expect(normalized_boundary.relative_x == -24 && normalized_boundary.relative_y == -12 &&
-        normalized_boundary.logical_width == 310 && normalized_boundary.logical_height == 300 &&
+        normalized_boundary.logical_width == 300 && normalized_boundary.logical_height == 280 &&
         normalized_boundary.dpi == 48,
         "valid placement boundaries and negative coordinates preserved", checks)) return 1;
     Placement upper_boundary;
@@ -435,7 +435,7 @@ int main() {
     non_finite.dpi = 769;
     const auto normalized_non_finite = normalize(non_finite);
     if (!expect(normalized_non_finite.relative_x == 0 && normalized_non_finite.relative_y == 0 &&
-        normalized_non_finite.logical_width == 360 && normalized_non_finite.logical_height == 520 &&
+        normalized_non_finite.logical_width == 360 && normalized_non_finite.logical_height == 460 &&
         normalized_non_finite.dpi == 96,
         "non-finite placement fields fallback independently", checks)) return 1;
 
@@ -445,14 +445,14 @@ int main() {
     };
     const auto empty_monitor_rect = restorePlacement(Placement{}, {}, "primary");
     if (!expect(empty_monitor_rect.left == 0 && empty_monitor_rect.top == 0 &&
-        empty_monitor_rect.right == 310 && empty_monitor_rect.bottom == 300,
-        "empty monitor list uses WPF fallback rectangle", checks)) return 1;
+        empty_monitor_rect.right == 300 && empty_monitor_rect.bottom == 280,
+        "empty monitor list uses macOS fallback rectangle", checks)) return 1;
     Placement secondary;
     secondary.monitor_id = "secondary";
     secondary.relative_x = 100;
     secondary.relative_y = 50;
     secondary.logical_width = 360;
-    secondary.logical_height = 520;
+    secondary.logical_height = 460;
     secondary.dpi = 96;
     const auto secondary_rect = restorePlacement(secondary, monitors, "primary");
     if (!expect(secondary_rect.left == -1130 && secondary_rect.top == 75 &&
@@ -472,11 +472,11 @@ int main() {
     primary_100.relative_x = 10;
     primary_100.relative_y = 20;
     primary_100.logical_width = 360;
-    primary_100.logical_height = 520;
+    primary_100.logical_height = 460;
     const auto primary_rect = restorePlacement(primary_100, monitors, "primary");
     if (!expect(primary_rect.left == 10 && primary_rect.top == 20 &&
         primary_rect.right - primary_rect.left == 360 &&
-        primary_rect.bottom - primary_rect.top == 520,
+        primary_rect.bottom - primary_rect.top == 460,
         "100 percent target DPI uses logical dimensions", checks)) return 1;
     const std::vector<MonitorWorkArea> high_dpi_monitors{
         MonitorWorkArea{"ultra", 1920, 0, 5760, 2160, 192, false}
@@ -486,11 +486,11 @@ int main() {
     high_dpi.relative_x = 10;
     high_dpi.relative_y = 20;
     high_dpi.logical_width = 360;
-    high_dpi.logical_height = 520;
+    high_dpi.logical_height = 460;
     const auto high_dpi_rect = restorePlacement(high_dpi, high_dpi_monitors, "ultra");
     if (!expect(high_dpi_rect.left == 1940 && high_dpi_rect.top == 40 &&
         high_dpi_rect.right - high_dpi_rect.left == 720 &&
-        high_dpi_rect.bottom - high_dpi_rect.top == 1040,
+        high_dpi_rect.bottom - high_dpi_rect.top == 920,
         "200 percent target DPI scales logical placement", checks)) return 1;
     const std::vector<MonitorWorkArea> tiny_monitors{
         MonitorWorkArea{"tiny", 0, 0, 200, 250, 192, true}
@@ -499,8 +499,8 @@ int main() {
     tiny.monitor_id = "TINY";
     tiny.relative_x = -1000;
     tiny.relative_y = -1000;
-    tiny.logical_width = 310;
-    tiny.logical_height = 300;
+    tiny.logical_width = 300;
+    tiny.logical_height = 280;
     const auto tiny_rect = restorePlacement(tiny, tiny_monitors, "tiny");
     if (!expect(tiny_rect.left == 0 && tiny_rect.top == 0 &&
         tiny_rect.right - tiny_rect.left == 200 && tiny_rect.bottom - tiny_rect.top == 250,
@@ -510,7 +510,7 @@ int main() {
     huge_positive.relative_x = std::numeric_limits<double>::max();
     huge_positive.relative_y = std::numeric_limits<double>::max();
     const auto huge_positive_rect = restorePlacement(huge_positive, monitors, "primary");
-    if (!expect(huge_positive_rect.left == 1560 && huge_positive_rect.top == 560 &&
+    if (!expect(huge_positive_rect.left == 1560 && huge_positive_rect.top == 620 &&
         huge_positive_rect.right == 1920 && huge_positive_rect.bottom == 1080,
         "huge positive coordinates clamp to work area edge", checks)) return 1;
     Placement huge_negative = huge_positive;
@@ -518,7 +518,7 @@ int main() {
     huge_negative.relative_y = -std::numeric_limits<double>::max();
     const auto huge_negative_rect = restorePlacement(huge_negative, monitors, "primary");
     if (!expect(huge_negative_rect.left == 0 && huge_negative_rect.top == 0 &&
-        huge_negative_rect.right == 360 && huge_negative_rect.bottom == 520,
+        huge_negative_rect.right == 360 && huge_negative_rect.bottom == 460,
         "huge negative coordinates clamp to work area origin", checks)) return 1;
     const std::vector<MonitorWorkArea> extreme_dpi_monitors{
         MonitorWorkArea{"extreme", 0, 0, 1920, 1080,

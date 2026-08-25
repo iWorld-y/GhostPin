@@ -180,10 +180,10 @@ std::optional<Status> nextStatus(Status status) noexcept {
 Placement normalize(Placement placement) {
     if (!std::isfinite(placement.relative_x)) placement.relative_x = 0;
     if (!std::isfinite(placement.relative_y)) placement.relative_y = 0;
-    if (!std::isfinite(placement.logical_width) || placement.logical_width < 310.0 ||
+    if (!std::isfinite(placement.logical_width) || placement.logical_width < 300.0 ||
         placement.logical_width > 1920.0) placement.logical_width = 360;
-    if (!std::isfinite(placement.logical_height) || placement.logical_height < 300.0 ||
-        placement.logical_height > 1600.0) placement.logical_height = 520;
+    if (!std::isfinite(placement.logical_height) || placement.logical_height < 280.0 ||
+        placement.logical_height > 1600.0) placement.logical_height = 460;
     if (placement.dpi < 48 || placement.dpi > 768) placement.dpi = 96;
     return placement;
 }
@@ -221,7 +221,7 @@ HudSettings normalize(HudSettings settings) {
         settings.scope = HudScope::All;
     }
     if (!std::isfinite(settings.opacity) || settings.opacity < 0.5 || settings.opacity > 1.0) {
-        settings.opacity = 0.92;
+        settings.opacity = 1.0;
     }
     if (settings.max_items < 1 || settings.max_items > 20) settings.max_items = 8;
     settings.placement = normalize(settings.placement);
@@ -243,7 +243,7 @@ PixelRect restorePlacement(
     std::string_view primary_monitor_id) {
     const Placement placement = normalize(raw_placement);
     const MonitorWorkArea* monitor = selectMonitor(placement, monitors, primary_monitor_id);
-    if (monitor == nullptr) return {0, 0, 310, 300};
+    if (monitor == nullptr) return {0, 0, 300, 280};
     const double scale = static_cast<double>(std::max(monitor->dpi, 1u)) / 96.0;
     const double area_width = std::max(
         static_cast<double>(monitor->right) - monitor->left, 1.0);
@@ -252,8 +252,8 @@ PixelRect restorePlacement(
     const double int_max = static_cast<double>(std::numeric_limits<int>::max());
     const double bounded_area_width = std::min(area_width, int_max);
     const double bounded_area_height = std::min(area_height, int_max);
-    const double minimum_width = std::min(310.0 * scale, bounded_area_width);
-    const double minimum_height = std::min(300.0 * scale, bounded_area_height);
+    const double minimum_width = std::min(300.0 * scale, bounded_area_width);
+    const double minimum_height = std::min(280.0 * scale, bounded_area_height);
     const int width = std::max(1, roundToInt(std::clamp(
         placement.logical_width * scale, minimum_width, bounded_area_width)));
     const int height = std::max(1, roundToInt(std::clamp(

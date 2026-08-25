@@ -317,6 +317,37 @@ int main(int argc, char** argv) {
             "encode out-of-range date", checks)) return 1;
         if (!expect(ghostpin::codec::encodeTodos({}).find("[]") != std::string::npos,
             "encode empty array", checks)) return 1;
+
+        HudSettings settings;
+        settings.visible = false;
+        settings.launch_at_login = true;
+        settings.mode = HudMode::Interactive;
+        settings.topmost = false;
+        settings.opacity = 0.75;
+        settings.scope = HudScope::Today;
+        settings.max_items = 12;
+        settings.hotkey_enabled = true;
+        settings.hotkey_modifiers = 0x0002;
+        settings.hotkey_key = 'G';
+        settings.placement.monitor_id = "DISPLAY2";
+        settings.placement.relative_x = -120;
+        settings.placement.relative_y = 24;
+        const auto settings_json = ghostpin::codec::encodeSettings(settings);
+        const auto settings_roundtrip = ghostpin::codec::decodeSettings(settings_json);
+        if (!expect(!settings_roundtrip.visible && settings_roundtrip.launch_at_login &&
+            settings_roundtrip.mode == HudMode::Interactive && !settings_roundtrip.topmost &&
+            settings_roundtrip.opacity == 0.75 && settings_roundtrip.scope == HudScope::Today &&
+            settings_roundtrip.max_items == 12 && settings_roundtrip.hotkey_enabled &&
+            settings_roundtrip.hotkey_modifiers == 0x0002 && settings_roundtrip.hotkey_key == 'G' &&
+            settings_roundtrip.placement.monitor_id == "DISPLAY2" &&
+            settings_roundtrip.placement.relative_x == -120,
+            "settings JSON roundtrip and normalization", checks)) return 1;
+        const auto settings_partial = ghostpin::codec::decodeSettings(
+            R"JSON({"opacity":"bad","maxItems":99,"unknown":true})JSON");
+        if (!expect(settings_partial.opacity == 1.0 && settings_partial.max_items == 8,
+            "settings invalid fields and unknown fields fallback", checks)) return 1;
+        if (!expectInvalid([&] { (void)ghostpin::codec::decodeSettings("["); },
+            "invalid settings JSON", checks)) return 1;
     } catch (const std::exception& error) {
         std::cerr << "FAIL unexpected codec check exception: " << error.what() << "\n";
         return 1;
