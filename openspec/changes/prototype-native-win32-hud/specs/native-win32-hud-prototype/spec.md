@@ -82,7 +82,7 @@
 - **THEN** 原型将其合并为一次稳定重载，HUD 不重复闪烁
 
 ### Requirement: 通知区域与双页设置基本一致
-通知区域 SHALL 提供显示或隐藏 HUD、切换交互模式、打开设置和退出入口。设置窗口 SHALL 包含“HUD”和“高级”两个页签：HUD 页调整透明度、显示范围、条数上限和置顶，高级页录制或清除唯一的可选全局交互快捷键。设置修改 SHALL 立即应用并持久化，重复打开 MUST 复用同一窗口实例。
+通知区域 SHALL 提供显示或隐藏 HUD、切换交互模式、打开设置和退出入口。设置窗口 SHALL 包含“HUD”和“高级”两个页签：HUD 页调整透明度、显示范围、条数上限、置顶和登录时启动，高级页录制或清除唯一的可选全局交互快捷键。设置修改 SHALL 立即应用并持久化，重复打开 MUST 复用同一窗口实例。
 
 #### Scenario: 打开并修改 HUD 设置
 - **WHEN** 用户从通知区域打开设置并修改透明度、范围、条数上限或置顶
@@ -119,8 +119,8 @@
 - **THEN** 当前 WPF 实现和发布流程保持不变，评估记录明确失败原因且不得把原型切换为正式 Windows 产物
 
 ### Requirement: 原型不进入正式发布
-本变更期间，Windows 默认开发命令和 GitHub Release SHALL 继续使用现有 WPF 实现。原生原型 MUST NOT 替换正式下载、删除 WPF 项目或改变 macOS 行为；任何切换 SHALL 通过后续独立变更决定。
+本变更期间，GitHub Release SHALL 继续使用现有 WPF 产物，原生实现 MUST NOT 替换正式下载或改变 macOS 工程。Windows 本地开发入口 SHALL 通过平台自动识别的 `make start` 构建并启动原生实现；WPF 项目在迁移期间作为回退基线保留，正式退场 SHALL 通过后续独立变更决定。
 
 #### Scenario: 完成本变更
 - **WHEN** 原生原型、测试和评估记录完成
-- **THEN** 当前 Windows 发布仍产出既有 WPF EXE，macOS 构建与 DMG 不变，原生方案仅作为已验证的候选实现存在
+- **THEN** 当前 Windows 发布仍产出既有 WPF EXE，Windows 本地 `make start` 可启动原生实现，macOS 构建与 DMG 不变

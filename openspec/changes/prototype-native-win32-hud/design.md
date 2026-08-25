@@ -2,23 +2,25 @@
 
 当前 Windows 实现位于 `windows/`，以 .NET 10 WPF 承担布局、绘制和控件，以窄 Win32 平台层实现 HWND 样式、全局快捷键、多显示器与 DPI。任务模型、投影、原子存储和设置已下沉到独立 Core，但不能被 C++ 直接复用；现有自包含单文件 EXE 约 74.5 MB。
 
-本原型必须并行落地，避免在尚未取得体积、性能和行为证据前扰动 WPF 版本或发布流程。行为合同见 `specs/native-win32-hud-prototype/spec.md`，动机与产品边界见 `proposal.md`。
+本实现先并行落地，避免在尚未取得体积、性能和行为证据前扰动 WPF 正式基线或发布流程；用户已确认后续 Windows 只保留原生客户端。行为合同见 `specs/native-win32-hud-prototype/spec.md`，动机与产品边界见 `proposal.md`。
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- 使用 Windows SDK 内置能力实现可单文件分发的 x64 原生 HUD，并把平台窗口、绘制、领域、存储和应用编排分离。
+- 使用 Windows SDK 内置能力实现可单文件分发的 x64 原生 Windows 客户端，并把平台窗口、绘制、领域、存储和应用编排分离。
 - 对齐现有 WPF 版的核心 HUD、托盘、设置、快捷键和任务文件行为，而不是只制作无法实际使用的视觉样例。
 - 让领域规则、JSON 兼容、窗口样式计算和指标采集具备自动化验证入口，把真实焦点、穿透和多屏行为留给可记录的真机验收。
 - 在同一设备和构建配置下形成可重复的 WPF/原生体积、启动和内存对照。
 
 **Non-Goals:**
 
-- 不在原型阶段共享 Swift、C# 与 C++ 的运行时代码，也不重构既有 WPF 或 macOS 工程。
+- 不共享 Swift、C# 与 C++ 的运行时代码；迁移期间保留既有 WPF 基线，不让它成为原生运行时依赖。
 - 不引入 Qt、WinUI 3、Windows App SDK、WebView、第三方 JSON/UI 库或插件体系。
-- 不修改 Makefile 默认 Windows 目标、Release workflow、正式产物命名或安装方式。
-- 不扩展现有 Windows 产品范围，不实现虚拟桌面、独占全屏、CLI、提醒、安装器、自动更新和开机启动。
+- 不修改 Release workflow、正式产物命名或安装方式；本地 Windows `make start` 单独指向原生开发目标。
+- 不扩展现有 Windows 产品范围，不实现虚拟桌面、独占全屏、CLI、提醒、安装器或自动更新；登录时启动作为 macOS 已有的客户端设置实现。
+
+用户已确认：Windows 的 `make start` 在平台自动识别后应构建并启动原生客户端；这只影响本地开发入口，不代表本变更立即切换 GitHub Release。
 
 ## Decisions
 
@@ -87,6 +89,10 @@ Storage 在线程中使用 `ReadDirectoryChangesW` 监听任务目录，把相�
 PowerShell 评估脚本在同一提交和设备分别完成 WPF 自包含 Release publish 与原生 Release build，记录 EXE 精确字节数和发布目录文件数；每个实现冷启动多次，以对应进程出现可见 HUD 作为就绪点，记录中位启动耗时，并在稳定等待后采集工作集。原始样本和汇总写入 `docs/windows-native-hud-evaluation.md`，同时记录 SDK、编译器、Windows 版本和命令。
 
 自动化检查覆盖 JSON fixtures、投影、状态推进、冷却、设置校验、窗口样式计算和离屏恢复纯逻辑。真实透明、焦点、点击穿透、托盘、双页设置、热键、DPI 与多屏用固定清单人工验收。是否切换正式实现只依据评估记录，不在本变更中自动修改发布配置。
+
+### 10. 交互与设置以 macOS 为基准
+
+原生 Windows 客户端不再设计一套独立的产品交互。HUD 的默认穿透、交互模式、用户主动切换时的焦点处理、任务状态推进、设置页结构、登录时启动和快捷键录制均以 macOS 现有行为为基准；Windows 仅替换窗口、绘制、托盘和输入的系统实现。虚拟桌面固定按用户决定暂不实现。默认透明度为 `1.0`，初始尺寸为 `360×460`，最小尺寸为 `300×280`。设置序列化为 UTF-8 JSON，试用阶段文件名为 `native-settings.json`，完成 WPF 退场时再单独处理旧设置迁移。
 
 ## Risks / Trade-offs
 

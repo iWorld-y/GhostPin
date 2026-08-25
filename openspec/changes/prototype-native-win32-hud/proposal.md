@@ -1,6 +1,6 @@
 ## Why
 
-当前 Windows 版基于 .NET 10 WPF，自包含单文件发布约 74.5 MB，明显高于 macOS DMG，且核心 HUD 仍主要依赖托管运行时。需要用一个并行、可回退的原生原型验证 C++/Win32 + Direct2D 是否能在保持 GhostPin 基本交互一致的同时，显著降低发布体积和运行时依赖。
+当前 Windows 版基于 .NET 10 WPF，自包含单文件发布约 74.5 MB，明显高于 macOS DMG，且核心 HUD 仍主要依赖托管运行时。先用并行、可回退的原生实现验证 C++/Win32 + Direct2D，再将其打磨为最终唯一的 Windows 客户端，以保持 GhostPin 与 macOS 一致的交互并降低发布体积和运行时依赖。
 
 ## What Changes
 
@@ -8,8 +8,15 @@
 - 在独立目录和独立可执行文件中实现与当前 Windows 版一致的核心链路：透明置顶 HUD、默认穿透、交互模式、任务投影与状态推进、文件刷新、通知区域入口、浅色双页设置和可选全局快捷键。
 - 复用 `%LOCALAPPDATA%\GhostPin\todos.json` 任务契约，但使用原型专属设置文件，避免覆盖现有 WPF 设置；不同时启动两种 Windows HUD 作为受支持场景。
 - 增加可重复的 Release x64 构建、行为检查和包体/启动时间/空闲内存采样，形成与当前 WPF 自包含 EXE 的对照结果和保留、替换或终止原型的决策记录。
-- 原型阶段不改变现有 WPF 项目、Makefile 默认 Windows 目标、GitHub Release 产物或 macOS 实现；通过验收门槛后再单独提出替换与发布变更。
-- 不实现虚拟桌面固定、独占全屏覆盖、Windows CLI、提醒通知、安装器、自动更新或开机启动。
+- 暂不接入 GitHub Release；Windows 开发阶段通过平台自动识别的 `make start` 构建并启动原生客户端，正式下载与发布切换另行处理。
+- 不实现虚拟桌面固定、独占全屏覆盖、Windows CLI、提醒通知、安装器或自动更新；登录时启动属于与 macOS 对齐的客户端设置。
+
+### 已确认的产品决策
+
+- 后续 Windows 只保留原生客户端，WPF 仅作为迁移期间的回退基线。
+- HUD、托盘、设置、快捷键、任务推进、文件刷新和焦点语义均以 macOS 版本为行为基准；Windows 只保留平台差异。
+- 设置采用 JSON 文件；试用阶段写入 `%LOCALAPPDATA%\\GhostPin\\native-settings.json`，与旧 WPF 设置隔离。
+- 视觉对齐 macOS 的浅色 GhostPin HUD，不以当前 WPF 的黑色或独立视觉为目标。
 
 ## Capabilities
 

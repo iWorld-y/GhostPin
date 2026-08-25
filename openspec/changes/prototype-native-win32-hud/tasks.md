@@ -33,10 +33,12 @@
 ## 5. 托盘、设置、快捷键与应用编排
 
 - [ ] 5.1 实现只负责连接 Core、Storage、Platform 和 Render 的 App Controller，以及启动、隐藏 HUD、错误诊断和有序退出生命周期
-- [ ] 5.2 使用 `Shell_NotifyIconW` 和同源 GhostPin 图标实现显示/隐藏、模式切换、设置和退出菜单，保持勾选状态与 HUD 状态同步并清理退出后的托盘图标
-- [ ] 5.3 使用 Win32 Common Controls 实现单实例浅色设置窗口及 HUD/高级双页，接入透明度、范围、条数上限、置顶和立即持久化
+- [x] 5.2 使用 `Shell_NotifyIconW` 和同源 GhostPin 图标实现显示/隐藏、模式切换、设置和退出菜单，保持勾选状态与 HUD 状态同步并清理退出后的托盘图标
+- [x] 5.3 使用 Win32 Common Controls 实现单实例浅色设置窗口及 HUD/高级双页，接入透明度、范围、条数上限、置顶和立即持久化
 - [ ] 5.4 在高级页实现快捷键录制、Esc 取消、清除、`RegisterHotKey`/`UnregisterHotKey`、`MOD_NOREPEAT`、冲突回退及模式同步
 - [ ] 5.5 完成异常路径编排，验证 JSON、设置、渲染、托盘或平台调用失败时保留最后有效任务、输出可诊断信息并安全释放资源
+- [x] 5.6 接入根目录平台自动识别的 `make start`，在 Windows 上构建并启动原生客户端，在 macOS 上保持现有启动行为
+- [x] 5.7 在 HUD 设置页实现“登录时启动”，使用当前用户范围的 Windows 启动注册机制并与设置 JSON 原子同步
 
 ## 6. 构建、验证与决策记录
 
@@ -48,5 +50,5 @@
 - [ ] 6.6 备份测试任务文件并确认 WPF 已退出后，人工验证外部创建、修改、原子替换、短暂损坏恢复、状态推进竞争和 500ms 冷却，结束后恢复测试前数据
 - [ ] 6.7 实现可重复评估脚本，在同一提交、设备和 Release x64 配置下多次采集 WPF 与原生 EXE 精确字节数、发布文件数、HUD 可见启动耗时和稳定工作集
 - [ ] 6.8 在 `docs/windows-native-hud-evaluation.md` 记录原始样本、环境、命令、汇总值、相对差值、人工验收结果和继续/替换/终止建议，未通过门槛时明确保留 WPF
-- [ ] 6.9 重新运行现有 Windows WPF 构建与测试，确认 Makefile 默认 Windows 目标、Release workflow、正式 EXE 和 macOS 工程均未被原型改写
+- [ ] 6.9 重新运行现有 Windows WPF 构建与测试，确认 WPF 回退基线、Release workflow、正式 EXE 和 macOS 工程均未被原型改写，并验证 Windows `make start` 启动原生客户端
 - [ ] 6.10 运行 `openspec validate prototype-native-win32-hud --strict` 和全量严格校验，检查最终 diff 只包含原型、评估及明确规划范围，不提交构建产物

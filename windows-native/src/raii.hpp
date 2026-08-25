@@ -133,6 +133,31 @@ private:
     HGDIOBJ value_{nullptr};
 };
 
+class unique_device_context final {
+public:
+    unique_device_context() noexcept = default;
+    explicit unique_device_context(HDC value) noexcept : value_(value) {}
+    unique_device_context(const unique_device_context&) = delete;
+    unique_device_context& operator=(const unique_device_context&) = delete;
+    unique_device_context(unique_device_context&& other) noexcept
+        : value_(std::exchange(other.value_, nullptr)) {}
+    unique_device_context& operator=(unique_device_context&& other) noexcept {
+        if (this != &other) reset(std::exchange(other.value_, nullptr));
+        return *this;
+    }
+    ~unique_device_context() { reset(); }
+
+    HDC get() const noexcept { return value_; }
+    explicit operator bool() const noexcept { return value_ != nullptr; }
+    void reset(HDC value = nullptr) noexcept {
+        if (value_ != nullptr && value_ != value) DeleteDC(value_);
+        value_ = value;
+    }
+
+private:
+    HDC value_{nullptr};
+};
+
 class unique_icon final {
 public:
     unique_icon() noexcept = default;

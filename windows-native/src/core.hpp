@@ -96,15 +96,16 @@ struct Placement {
     double relative_x{0};
     double relative_y{0};
     double logical_width{360};
-    double logical_height{520};
+    double logical_height{460};
     std::uint32_t dpi{96};
 };
 
 struct HudSettings {
     bool visible{true};
+    bool launch_at_login{false};
     HudMode mode{HudMode::Passthrough};
     bool topmost{true};
-    double opacity{0.92};
+    double opacity{1.0};
     HudScope scope{HudScope::All};
     int max_items{8};
     bool hotkey_enabled{false};
