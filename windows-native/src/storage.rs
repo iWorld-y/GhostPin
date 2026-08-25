@@ -17,6 +17,20 @@ use crate::{
     core::{HudSettings, Todo},
 };
 
+/// Determines whether a debounced file reload should trigger a redraw.
+///
+/// A successful write performed by this process produces a directory change
+/// notification as well. When the reloaded snapshot is identical, that event
+/// can be consumed without drawing a duplicate frame; external changes must
+/// always be rendered.
+pub fn should_redraw_after_reload<T: PartialEq>(
+    previous: &[T],
+    current: &[T],
+    own_write_pending: bool,
+) -> bool {
+    !own_write_pending && current != previous
+}
+
 #[derive(Debug)]
 pub struct StorageError {
     pub operation: &'static str,
@@ -140,15 +154,25 @@ impl TaskRepository {
     pub fn snapshot(&self) -> &[Todo] {
         &self.snapshot
     }
-    pub fn load(&mut self) -> Result<&[Todo], StorageError> {
-        if !self.path.exists() {
-            self.snapshot.clear();
-            return Ok(&self.snapshot);
-        }
+    fn load_existing(&mut self) -> Result<&[Todo], StorageError> {
         let text = read_utf8(&self.path)?;
         let parsed = codec::decode_todos(&text).map_err(StorageError::from)?;
         self.snapshot = parsed;
         Ok(&self.snapshot)
+    }
+    pub fn load(&mut self) -> Result<&[Todo], StorageError> {
+        if !self.path.exists() {
+            return Ok(&self.snapshot);
+        }
+        self.load_existing()
+    }
+    /// Reloads the file for a mutating operation and rejects a missing file.
+    ///
+    /// A normal watcher refresh may keep the last valid snapshot when the
+    /// file is temporarily absent. A user-triggered state transition must not
+    /// use that snapshot to recreate a file that another process deleted.
+    pub fn load_for_update(&mut self) -> Result<&[Todo], StorageError> {
+        self.load_existing()
     }
     pub fn replace(&mut self, items: &[Todo]) -> Result<(), StorageError> {
         let text = codec::encode_todos(items).map_err(StorageError::from)?;

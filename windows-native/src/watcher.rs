@@ -15,7 +15,9 @@ use std::{
 
 use windows::{
     Win32::{
-        Foundation::{CloseHandle, ERROR_IO_PENDING, WAIT_OBJECT_0, WAIT_TIMEOUT},
+        Foundation::{
+            CloseHandle, ERROR_IO_PENDING, ERROR_NOTIFY_ENUM_DIR, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        },
         Storage::FileSystem::{
             CreateFileW, FILE_ACTION_ADDED, FILE_ACTION_MODIFIED, FILE_ACTION_REMOVED,
             FILE_ACTION_RENAMED_NEW_NAME, FILE_ACTION_RENAMED_OLD_NAME, FILE_FLAG_BACKUP_SEMANTICS,
@@ -44,7 +46,17 @@ pub struct FileChange {
     pub name: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WatcherEvent {
+    Changes(Vec<FileChange>),
+    Overflow,
+    Error(String),
+}
+
 pub fn parse_notifications(buffer: &[u8], bytes: usize) -> Result<Vec<FileChange>, String> {
+    if bytes > buffer.len() {
+        return Err("FILE_NOTIFY_INFORMATION byte count exceeds buffer".into());
+    }
     let mut offset = 0usize;
     let mut changes = Vec::new();
     while offset < bytes {
@@ -112,7 +124,7 @@ pub struct DirectoryWatcher {
     join: Option<JoinHandle<()>>,
 }
 impl DirectoryWatcher {
-    pub fn start(path: PathBuf) -> Result<(Self, Receiver<Vec<FileChange>>), WatcherError> {
+    pub fn start(path: PathBuf) -> Result<(Self, Receiver<WatcherEvent>), WatcherError> {
         let (sender, receiver) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
@@ -141,7 +153,7 @@ impl Drop for DirectoryWatcher {
     }
 }
 
-fn worker(path: PathBuf, stop: Arc<AtomicBool>, sender: Sender<Vec<FileChange>>) {
+fn worker(path: PathBuf, stop: Arc<AtomicBool>, sender: Sender<WatcherEvent>) {
     let path = HSTRING::from(path.to_string_lossy().as_ref());
     let handle = unsafe {
         CreateFileW(
@@ -155,10 +167,16 @@ fn worker(path: PathBuf, stop: Arc<AtomicBool>, sender: Sender<Vec<FileChange>>)
         )
     };
     let Ok(handle) = handle else {
+        let _ = sender.send(WatcherEvent::Error(
+            "CreateFileW watcher directory failed".into(),
+        ));
         return;
     };
     let event = unsafe { CreateEventW(None, true, false, None) };
     let Ok(event) = event else {
+        let _ = sender.send(WatcherEvent::Error(
+            "CreateEventW watcher event failed".into(),
+        ));
         unsafe {
             let _ = CloseHandle(handle);
         }
@@ -169,7 +187,7 @@ fn worker(path: PathBuf, stop: Arc<AtomicBool>, sender: Sender<Vec<FileChange>>)
         hEvent: event,
         ..Default::default()
     });
-    loop {
+    'watch: loop {
         if stop.load(Ordering::Acquire) {
             break;
         }
@@ -192,6 +210,9 @@ fn worker(path: PathBuf, stop: Arc<AtomicBool>, sender: Sender<Vec<FileChange>>)
         };
         if let Err(error) = result {
             if error.code() != ERROR_IO_PENDING.into() {
+                let _ = sender.send(WatcherEvent::Error(format!(
+                    "ReadDirectoryChangesW: {error}"
+                )));
                 break;
             }
         }
@@ -200,8 +221,17 @@ fn worker(path: PathBuf, stop: Arc<AtomicBool>, sender: Sender<Vec<FileChange>>)
             if wait == WAIT_OBJECT_0 {
                 break;
             }
-            if wait != WAIT_TIMEOUT && stop.load(Ordering::Acquire) {
-                break;
+            if wait != WAIT_TIMEOUT {
+                if !stop.load(Ordering::Acquire) {
+                    let _ = sender.send(WatcherEvent::Error(format!(
+                        "WaitForSingleObject watcher event returned {wait:?}"
+                    )));
+                }
+                unsafe {
+                    let _ = CancelIoEx(handle, Some(&*overlapped));
+                    let _ = WaitForSingleObject(event, INFINITE);
+                }
+                break 'watch;
             }
             if stop.load(Ordering::Acquire) {
                 unsafe {
@@ -217,12 +247,22 @@ fn worker(path: PathBuf, stop: Arc<AtomicBool>, sender: Sender<Vec<FileChange>>)
             break;
         }
         let mut bytes = 0u32;
-        if unsafe { GetOverlappedResult(handle, &*overlapped, &mut bytes, false) }.is_ok()
-            && bytes > 0
-        {
-            if let Ok(changes) = parse_notifications(&buffer, bytes as usize) {
-                let _ = sender.send(changes);
+        match unsafe { GetOverlappedResult(handle, &*overlapped, &mut bytes, false) } {
+            Ok(()) if bytes > 0 => match parse_notifications(&buffer, bytes as usize) {
+                Ok(changes) => {
+                    let _ = sender.send(WatcherEvent::Changes(changes));
+                }
+                Err(error) => {
+                    let _ = sender.send(WatcherEvent::Error(error));
+                }
+            },
+            Err(error) if error.code() == ERROR_NOTIFY_ENUM_DIR.into() => {
+                let _ = sender.send(WatcherEvent::Overflow);
             }
+            Err(error) if !stop.load(Ordering::Acquire) => {
+                let _ = sender.send(WatcherEvent::Error(format!("GetOverlappedResult: {error}")));
+            }
+            _ => {}
         }
     }
     unsafe {

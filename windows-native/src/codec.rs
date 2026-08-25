@@ -1,5 +1,4 @@
 use std::{
-    cell::Cell,
     fmt,
     marker::PhantomData,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -7,7 +6,7 @@ use std::{
 
 use windows::{
     Data::Json::{IJsonValue, JsonArray, JsonObject, JsonValue, JsonValueType},
-    Win32::System::WinRT::{RO_INIT_SINGLETHREADED, RoInitialize},
+    Win32::System::WinRT::{RO_INIT_SINGLETHREADED, RoInitialize, RoUninitialize},
     core::{Error as WindowsError, HSTRING, Param},
 };
 
@@ -33,31 +32,24 @@ impl From<WindowsError> for CodecError {
 }
 type Result<T> = std::result::Result<T, CodecError>;
 
-// 每个直接使用 WinRT 的线程都必须独立持有一个 apartment guard。
-thread_local! { static APARTMENT_INITIALIZED: Cell<bool> = const { Cell::new(false) }; }
 pub struct RuntimeApartment {
-    initialized_here: bool,
     _thread_affine: PhantomData<std::rc::Rc<()>>,
 }
 impl RuntimeApartment {
     pub fn new() -> Result<Self> {
-        if APARTMENT_INITIALIZED.with(Cell::get) {
-            return Ok(Self {
-                initialized_here: false,
-                _thread_affine: PhantomData,
-            });
-        } // SAFETY: this initializes the apartment for the current thread only.
+        // SAFETY: this initializes (or increments) the apartment for the current thread only.
         unsafe { RoInitialize(RO_INIT_SINGLETHREADED) }.map_err(CodecError::from)?;
-        APARTMENT_INITIALIZED.with(|value| value.set(true));
         Ok(Self {
-            initialized_here: true,
             _thread_affine: PhantomData,
         })
     }
 }
 impl Drop for RuntimeApartment {
     fn drop(&mut self) {
-        let _ = self.initialized_here;
+        // SAFETY: every successful RoInitialize call has a matching guard and uninitialize.
+        unsafe {
+            RoUninitialize();
+        }
     }
 }
 
@@ -699,5 +691,36 @@ mod tests {
         })
         .join()
         .expect("WinRT test thread");
+    }
+
+    #[test]
+    fn nested_apartment_guards_can_drop_in_reverse_order() {
+        std::thread::spawn(|| {
+            let outer = RuntimeApartment::new().expect("outer WinRT apartment");
+            let item = Todo {
+                id: "123e4567-e89b-12d3-a456-426614174001".into(),
+                title: "嵌套 apartment".into(),
+                created_at: UNIX_EPOCH,
+                status: Status::Todo,
+                completed_at: None,
+                reminder_at: None,
+                reminder_sent_at: None,
+                priority: Priority::Medium,
+                due_at: None,
+                description: None,
+            };
+            let encoded = encode_todos(std::slice::from_ref(&item)).expect("encode");
+            {
+                let _inner = RuntimeApartment::new().expect("inner WinRT apartment");
+                assert_eq!(
+                    decode_todos(&encoded).expect("inner decode"),
+                    vec![item.clone()]
+                );
+            }
+            assert_eq!(decode_todos(&encoded).expect("outer decode"), vec![item]);
+            drop(outer);
+        })
+        .join()
+        .expect("WinRT nested apartment test thread");
     }
 }

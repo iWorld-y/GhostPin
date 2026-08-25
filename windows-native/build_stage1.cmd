@@ -17,7 +17,7 @@ if errorlevel 1 (
 
 set "CARGO=%USERPROFILE%\.cargo\bin\cargo.exe"
 if not exist "%CARGO%" set "CARGO=cargo"
-"%CARGO%" build --manifest-path "%~dp0Cargo.toml" --release
+"%CARGO%" build --manifest-path "%~dp0Cargo.toml" --release --bin ghostpin-native
 if errorlevel 1 (
     popd
     exit /b 20

@@ -4,7 +4,9 @@
 pub mod codec;
 pub mod core;
 pub mod diagnostics;
+pub mod lifecycle;
 pub mod platform;
 pub mod render;
+pub mod settings;
 pub mod storage;
 pub mod watcher;
