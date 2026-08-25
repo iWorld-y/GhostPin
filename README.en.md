@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Sources/GhostPin/Resources/Logo/GhostPinLogo.png" width="128" height="128" alt="GhostPin app icon">
+  <img src="macos/Sources/GhostPin/Resources/Logo/GhostPinLogo.png" width="128" height="128" alt="GhostPin app icon">
 </p>
 
 # GhostPin
@@ -113,8 +113,8 @@ make cli ARGS='list --json' # Run the development CLI
 The underlying scripts are also available:
 
 ```bash
-swift build
-swift run GhostPinCoreChecks
+swift build --package-path macos
+swift run --package-path macos GhostPinCoreChecks
 ./script/build_and_run.sh --verify
 ./script/package_dmg.sh
 ```
@@ -134,12 +134,13 @@ GHOST_PIN_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./script/
 ## Repository layout
 
 ```text
-Sources/GhostPin/             macOS SwiftUI app
-Sources/GhostPinCore/         todo, reminder, parsing, and storage logic
-Sources/GhostPinCLI/          ghostpin-cli command-line tool
-Sources/GhostPin/Resources/   app icon and logo
-Tests/GhostPinCoreChecks/     executable core behavior checks
-script/                      app packaging and DMG scripts
+macos/Package.swift               macOS Swift Package definition
+macos/Sources/GhostPin/           macOS SwiftUI app
+macos/Sources/GhostPinCore/       todo, reminder, parsing, and storage logic
+macos/Sources/GhostPinCLI/        ghostpin-cli command-line tool
+macos/Sources/GhostPin/Resources/ app icon and logo
+macos/Tests/GhostPinCoreChecks/   executable core behavior checks
+script/                           app packaging and DMG scripts
 ```
 
 ## License

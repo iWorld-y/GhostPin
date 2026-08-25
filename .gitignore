@@ -6,6 +6,6 @@
 .codegraph/
 dist/
 DerivedData/
-Sources/TodoPin/Resources/Models/*.bin
+macos/Sources/GhostPin/Resources/Models/*.bin
 *.xcuserstate
 .DS_Store

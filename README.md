@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Sources/GhostPin/Resources/Logo/GhostPinLogo.png" width="128" height="128" alt="GhostPin 应用图标">
+  <img src="macos/Sources/GhostPin/Resources/Logo/GhostPinLogo.png" width="128" height="128" alt="GhostPin 应用图标">
 </p>
 
 # GhostPin
@@ -113,8 +113,8 @@ make cli ARGS='list --json' # 执行开发版 CLI
 也可以直接使用底层脚本：
 
 ```bash
-swift build
-swift run GhostPinCoreChecks
+swift build --package-path macos
+swift run --package-path macos GhostPinCoreChecks
 ./script/build_and_run.sh --verify
 ./script/package_dmg.sh
 ```
@@ -134,12 +134,13 @@ GHOST_PIN_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./script/
 ## 仓库结构
 
 ```text
-Sources/GhostPin/             macOS SwiftUI 应用
-Sources/GhostPinCore/         待办、提醒、解析与存储的核心逻辑
-Sources/GhostPinCLI/          ghostpin-cli 命令行工具
-Sources/GhostPin/Resources/   应用图标与 Logo
-Tests/GhostPinCoreChecks/     可执行核心行为检查
-script/                      应用打包与 DMG 脚本
+macos/Package.swift                macOS Swift Package 定义
+macos/Sources/GhostPin/            macOS SwiftUI 应用
+macos/Sources/GhostPinCore/        待办、提醒、解析与存储的核心逻辑
+macos/Sources/GhostPinCLI/         ghostpin-cli 命令行工具
+macos/Sources/GhostPin/Resources/  应用图标与 Logo
+macos/Tests/GhostPinCoreChecks/    可执行核心行为检查
+script/                            应用打包与 DMG 脚本
 ```
 
 ## 许可证

@@ -6,6 +6,7 @@ BUNDLE_ID="com.oyuxi.TodoPin"
 MIN_SYSTEM_VERSION="14.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MACOS_ROOT="$ROOT_DIR/macos"
 VERSION="${GHOST_PIN_VERSION:-$(cat "$ROOT_DIR/script/VERSION" 2>/dev/null | tr -d '[:space:]' || true)}"
 VERSION="${VERSION:-0.0.1}"
 DMG_NAME="${APP_NAME}-${VERSION}.dmg"
@@ -20,7 +21,7 @@ INFO_PLIST="$APP_CONTENTS/Info.plist"
 DMG_STAGING="$DIST_DIR/dmg-staging"
 DMG_PATH="$DIST_DIR/$DMG_NAME"
 
-cd "$ROOT_DIR"
+cd "$MACOS_ROOT"
 
 swift build -c release
 BUILD_DIR="$(swift build -c release --show-bin-path)"
@@ -34,8 +35,8 @@ cp "$BUILD_DIR/ghostpin-cli" "$APP_MACOS/ghostpin-cli"
 chmod +x "$APP_BINARY" "$APP_MACOS/ghostpin-cli"
 test -x "$APP_MACOS/ghostpin-cli" # 与主程序同取自 BUILD_DIR，同一次 release 构建
 
-if [[ -d "$ROOT_DIR/Sources/GhostPin/Resources" ]]; then
-  rsync -a --exclude 'Models/README.md' "$ROOT_DIR/Sources/GhostPin/Resources/" "$APP_RESOURCES/"
+if [[ -d "$MACOS_ROOT/Sources/GhostPin/Resources" ]]; then
+  rsync -a --exclude 'Models/README.md' "$MACOS_ROOT/Sources/GhostPin/Resources/" "$APP_RESOURCES/"
 fi
 
 cat >"$INFO_PLIST" <<PLIST

@@ -7,6 +7,7 @@ BUNDLE_ID="com.oyuxi.TodoPin"
 MIN_SYSTEM_VERSION="14.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MACOS_ROOT="$ROOT_DIR/macos"
 DIST_DIR="$ROOT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
@@ -16,7 +17,7 @@ APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 
-cd "$ROOT_DIR"
+cd "$MACOS_ROOT"
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
@@ -31,8 +32,8 @@ cp "$BUILD_BINARY" "$APP_BINARY"
 cp "$BUILD_CLI" "$APP_MACOS/ghostpin-cli"
 chmod +x "$APP_BINARY" "$APP_MACOS/ghostpin-cli"
 
-if [[ -d "$ROOT_DIR/Sources/GhostPin/Resources" ]]; then
-  rsync -a --exclude 'Models/README.md' "$ROOT_DIR/Sources/GhostPin/Resources/" "$APP_RESOURCES/"
+if [[ -d "$MACOS_ROOT/Sources/GhostPin/Resources" ]]; then
+  rsync -a --exclude 'Models/README.md' "$MACOS_ROOT/Sources/GhostPin/Resources/" "$APP_RESOURCES/"
 fi
 
 cat >"$INFO_PLIST" <<PLIST

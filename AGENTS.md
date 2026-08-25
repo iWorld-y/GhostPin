@@ -20,21 +20,22 @@ make cli ARGS='list --json'         # 执行开发版 CLI；可能访问真实�
 make dmg                            # 构建并校验 DMG
 ```
 
-底层入口为 `swift build`、`swift run GhostPinCoreChecks`、`./script/build_and_run.sh --verify` 和 `./script/package_dmg.sh`。构建产物写入已忽略的 `.build/`、`dist/`。
+底层入口为 `swift build --package-path macos`、`swift run --package-path macos GhostPinCoreChecks`、`./script/build_and_run.sh --verify` 和 `./script/package_dmg.sh`。构建产物写入已忽略的 `macos/.build/`、`dist/`。
 
 ## Testing
 
 - 测试目标是可执行程序 `GhostPinCoreChecks`，不是 XCTest；`swift test` 不是本仓库的测试入口。
-- 所有用例定义在 `Tests/GhostPinCoreChecks/main.swift`，并须手动注册到文件顶部的 `checks` 数组，否则不会执行。目前没有单用例筛选器。
+- 所有用例定义在 `macos/Tests/GhostPinCoreChecks/main.swift`，并须手动注册到文件顶部的 `checks` 数组，否则不会执行。目前没有单用例筛选器。
 - 任一检查失败会输出 `FAIL` 并以退出码 1 结束。日期相关用例固定使用 GMT+8、`zh_CN` 日历，不要擅自更改。
 - Core 改动至少运行 `make test`；CLI 改动运行 `make build` 并为下沉到 Core 的行为运行 `make test`；AppKit/SwiftUI、窗口或设置改动运行 `make verify`；打包改动运行 `make dmg`。
 
 ## Project Structure
 
-- `Sources/GhostPinCore/`：Model、`TodoStore`、JSON 文件存储和日期支持；不得导入 AppKit 或 SwiftUI。
-- `Sources/GhostPin/`：应用入口、`AppState`、窗口协调、菜单栏、HUD、设置、通知、文件监听和可选全局快捷键。
-- `Sources/GhostPinCLI/`：`ghostpin-cli` 参数解析与输出，依赖 `GhostPinCore`。
-- `Tests/GhostPinCoreChecks/`：依赖 `GhostPinCore` 的可执行行为检查，不覆盖 CLI 参数解析或 AppKit/SwiftUI 层。
+- `macos/Package.swift`：macOS Swift Package 定义与 target 配置。
+- `macos/Sources/GhostPinCore/`：Model、`TodoStore`、JSON 文件存储和日期支持；不得导入 AppKit 或 SwiftUI。
+- `macos/Sources/GhostPin/`：应用入口、`AppState`、窗口协调、菜单栏、HUD、设置、通知、文件监听和可选全局快捷键。
+- `macos/Sources/GhostPinCLI/`：`ghostpin-cli` 参数解析与输出，依赖 `GhostPinCore`。
+- `macos/Tests/GhostPinCoreChecks/`：依赖 `GhostPinCore` 的可执行行为检查，不覆盖 CLI 参数解析或 AppKit/SwiftUI 层。
 - `skills/ghostpin-cli/`：已安装 App 的 Agent 操作契约。
 - `script/`：开发启动、DMG 打包与发布脚本。
 - `openspec/specs/`：当前正式规格；`openspec/changes/archive/`：已归档变更。

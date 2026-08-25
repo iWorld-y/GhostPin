@@ -1,4 +1,5 @@
 APP_NAME := GhostPin
+MACOS_PACKAGE_PATH := macos
 WINDOWS_APP_NAME := GhostPin.Windows.App
 WINDOWS_SOLUTION := windows/GhostPin.Windows.sln
 WINDOWS_APP_PROJECT := windows/src/GhostPin.Windows.App/GhostPin.Windows.App.csproj
@@ -100,10 +101,10 @@ stop:
 	@echo "$(APP_NAME) 已停止（如果正在运行）"
 
 build:
-	@swift build
+	@swift build --package-path $(MACOS_PACKAGE_PATH)
 
 test:
-	@swift run GhostPinCoreChecks
+	@swift run --package-path $(MACOS_PACKAGE_PATH) GhostPinCoreChecks
 
 verify:
 	@./script/build_and_run.sh --verify
@@ -119,7 +120,7 @@ cli:
 		echo "用法: make cli ARGS='list --json'" >&2; \
 		exit 2; \
 	fi
-	@swift run ghostpin-cli $(ARGS)
+	@swift run --package-path $(MACOS_PACKAGE_PATH) ghostpin-cli $(ARGS)
 
 dmg:
 	@./script/package_dmg.sh

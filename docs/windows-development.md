@@ -1,6 +1,6 @@
 # Windows HUD 开发说明
 
-Windows 版 GhostPin 位于 `windows/`，与现有 macOS Swift Package 并列。当前目标是 Windows 11 x64、.NET SDK 10.0.400 和 WPF；本变更不修改 `Sources/` 下的 macOS 代码。
+Windows 版 GhostPin 位于 `windows/`，与 `macos/` 下的 macOS Swift Package 并列。当前目标是 Windows 11 x64、.NET SDK 10.0.400 和 WPF；本变更不修改 `macos/` 下的 macOS 代码。
 
 ## 构建与运行
 

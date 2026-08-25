@@ -44,7 +44,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Run core checks
-        run: swift run GhostPinCoreChecks
+        run: swift run --package-path macos GhostPinCoreChecks
 
       - name: Build and package DMG
         env:
