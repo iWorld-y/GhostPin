@@ -1,14 +1,34 @@
 @echo off
 setlocal
-cd /d C:\Users\lance\source\GhostPin-native-win32\windows-native
-call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
-if errorlevel 1 exit /b 10
-set "CMAKE=C:\Users\lance\AppData\Local\Microsoft\WinGet\Links\cmake.exe"
-set "CTEST=C:\Users\lance\AppData\Local\Microsoft\WinGet\Links\ctest.exe"
-"%CMAKE%" -S . -B build-stage1 -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release
-if errorlevel 1 exit /b 20
-"%CMAKE%" --build build-stage1
-if errorlevel 1 exit /b 30
-"%CTEST%" --test-dir build-stage1 --output-on-failure
-if errorlevel 1 exit /b 40
+pushd "%~dp0"
+
+set "VSDEVCMD=%ProgramFiles(x86)%\Microsoft Visual Studio\2019\BuildTools\Common7\Tools\VsDevCmd.bat"
+if not exist "%VSDEVCMD%" set "VSDEVCMD=%ProgramFiles%\Microsoft Visual Studio\2019\BuildTools\Common7\Tools\VsDevCmd.bat"
+if not exist "%VSDEVCMD%" (
+    echo 未找到带 MSVC 与 Windows SDK 的 Visual Studio >&2
+    popd
+    exit /b 10
+)
+call "%VSDEVCMD%" -arch=x64 -host_arch=x64 >NUL
+if errorlevel 1 (
+    popd
+    exit /b 10
+)
+
+set "CARGO=%USERPROFILE%\.cargo\bin\cargo.exe"
+if not exist "%CARGO%" set "CARGO=cargo"
+"%CARGO%" build --manifest-path "%~dp0Cargo.toml" --release
+if errorlevel 1 (
+    popd
+    exit /b 20
+)
+
+if not exist "%~dp0build-stage1" mkdir "%~dp0build-stage1"
+copy /Y "%~dp0target\release\ghostpin-native.exe" "%~dp0build-stage1\GhostPin.Native.exe" >NUL
+if errorlevel 1 (
+    popd
+    exit /b 30
+)
+echo Rust 原生 Release 已生成：%~dp0build-stage1\GhostPin.Native.exe
+popd
 exit /b 0
