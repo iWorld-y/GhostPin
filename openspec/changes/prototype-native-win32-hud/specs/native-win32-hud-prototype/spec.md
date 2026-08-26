@@ -119,7 +119,7 @@
 - **THEN** 当前 WPF 实现和发布流程保持不变，评估记录明确失败原因且不得把原型切换为正式 Windows 产物
 
 ### Requirement: 原型不进入正式发布
-本变更期间，Windows 默认开发命令和 GitHub Release SHALL 继续使用现有 WPF 实现。原生原型 MUST NOT 替换正式下载、删除 WPF 项目或改变 macOS 行为；任何切换 SHALL 通过后续独立变更决定。
+本变更期间，Windows `make build`、`make test` 和 GitHub Release SHALL 继续使用现有 WPF 实现；开发命令 `make start` SHALL 明确启动 Rust 原生原型以支持验收。原生原型 MUST NOT 替换正式下载、删除 WPF 项目或改变 macOS 行为；正式切换 SHALL 通过后续独立变更决定。
 
 #### Scenario: 完成本变更
 - **WHEN** 原生原型、测试和评估记录完成

@@ -74,7 +74,17 @@ add_library(GhostPin.Native.App STATIC
     src/app.hpp
 )
 target_include_directories(GhostPin.Native.App PUBLIC "${NATIVE_INCLUDE_DIR}")
-target_link_libraries(GhostPin.Native.App PUBLIC GhostPin.Native.Core GhostPin.Native.Platform user32)
+target_link_libraries(GhostPin.Native.App PUBLIC
+    GhostPin.Native.Core
+    GhostPin.Native.Platform
+    GhostPin.Native.Repository
+    GhostPin.Native.StoragePaths
+    d2d1
+    dwrite
+    user32
+    advapi32
+    shcore
+)
 
 add_executable(GhostPin.Native.CoreChecks src/core_checks.cpp)
 target_link_libraries(GhostPin.Native.CoreChecks PRIVATE GhostPin.Native.Core)

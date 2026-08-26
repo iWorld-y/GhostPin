@@ -24,5 +24,7 @@ private:
 
 std::vector<core::Todo> decodeTodos(std::string_view utf8_json);
 std::string encodeTodos(const std::vector<core::Todo>& items);
+core::HudSettings decodeSettings(std::string_view utf8_json);
+std::string encodeSettings(const core::HudSettings& settings);
 
 } // namespace ghostpin::codec

@@ -1,6 +1,6 @@
 ## Context
 
-当前 Windows 实现位于 `windows/`，以 .NET 10 WPF 承担布局、绘制和控件，以窄 Win32 平台层实现 HWND 样式、全局快捷键、多显示器与 DPI。任务模型、投影、原子存储和设置已下沉到独立 Core，但不能被 C++ 直接复用；现有自包含单文件 EXE 约 74.5 MB。
+当前 Windows 实现位于 `windows/`，以 .NET 10 WPF 承担布局、绘制和控件，以窄 Win32 平台层实现 HWND 样式、全局快捷键、多显示器与 DPI。任务模型、投影、原子存储和设置已下沉到独立 Core，但不能被 Rust 直接复用；现有自包含单文件 EXE 约 74.5 MB。
 
 本原型必须并行落地，避免在尚未取得体积、性能和行为证据前扰动 WPF 版本或发布流程。行为合同见 `specs/native-win32-hud-prototype/spec.md`，动机与产品边界见 `proposal.md`。
 
@@ -15,18 +15,18 @@
 
 **Non-Goals:**
 
-- 不在原型阶段共享 Swift、C# 与 C++ 的运行时代码，也不重构既有 WPF 或 macOS 工程。
+- 不在原型阶段共享 Swift、C# 与 Rust 的运行时代码，也不重构既有 WPF 或 macOS 工程。
 - 不引入 Qt、WinUI 3、Windows App SDK、WebView、第三方 JSON/UI 库或插件体系。
 - 不修改 Makefile 默认 Windows 目标、Release workflow、正式产物命名或安装方式。
 - 不扩展现有 Windows 产品范围，不实现虚拟桌面、独占全屏、CLI、提醒、安装器、自动更新和开机启动。
 
 ## Decisions
 
-### 1. 建立并行的 CMake/MSVC C++20 工程
+### 1. 建立并行的 Cargo/windows-rs Rust 工程
 
-在 `windows-native/` 建立独立 CMake 工程，生成 `GhostPin.Native.exe`、无 UI 依赖的 Core 静态库和 Core 行为检查可执行程序。Release 使用 MSVC `/MT` 静态链接 C/C++ 运行库，品牌图标和视觉资源编译进 PE 资源，因此分发物只包含一个 EXE。
+在 `windows-native/` 建立独立 Cargo 工程，生成 `GhostPin.Native.exe`、无 UI 依赖的 Rust Core 模块和行为检查可执行程序。Release 固定 `x86_64-pc-windows-msvc`，启用静态 CRT、LTO、符号剥离和资源编译，品牌图标与 manifest 编译进 PE，因此分发物只包含一个 EXE。
 
-选择 CMake 是为了让 Visual Studio、Build Tools 和命令行使用同一工程定义，同时不把原型接入现有 .NET solution。备选的 `.vcxproj` 手工维护更贴近 Visual Studio，但会增加工程文件噪音；Qt、WinUI 3 和 Windows App SDK 会重新引入用户正在评估的运行时或框架负担。
+选择 Cargo/windows-rs 是为了用 Rust 所有权、`Result` 和 `Drop` 管理 Win32/COM/GDI 生命周期，同时不把原型接入现有 .NET solution。保留的 CMake 文件仅作为原始 C++ 评估记录，不参与当前 Rust Release 入口；Qt、WinUI 3 和 Windows App SDK 会重新引入用户正在评估的运行时或框架负担。
 
 ### 2. 按领域、存储、平台、渲染和编排拆分职责
 
@@ -42,13 +42,13 @@
 
 ### 3. 使用系统 JSON API而不是自研解析器或第三方头文件
 
-Storage 使用 Windows SDK 提供的 C++/WinRT `Windows.Data.Json` 解析和生成 JSON，外层仍转换为普通 C++ 模型，Core 不依赖 WinRT 类型。进程初始化 STA 后即可同时服务设置窗口和 JSON；Windows 11 自带所需运行时，不增加分发文件。
+Storage 使用 windows-rs 映射的 `Windows.Data.Json` 解析和生成 JSON，外层转换为普通 Rust 模型，Core 不依赖 WinRT 类型。进程初始化单线程 apartment 后即可同时服务设置窗口和 JSON；Windows 11 自带所需运行时，不增加分发文件。
 
 选择系统 API 可以避免自研 JSON 对转义、Unicode、数字和无效输入的高风险，也不引入 `nlohmann/json` 等第三方源码依赖。代价是 Storage 需要显式处理 UTF-8 与 `hstring` 转换，并通过 fixtures 验证与 C# codec 的兼容结果。
 
 ### 4. 以 DIB + Direct2D DC render target 输出逐像素透明窗口
 
-HUD 使用 32 位预乘 BGRA DIB section 作为离屏表面，Direct2D DC render target 绘制卡片、渐变、圆角和图形，DirectWrite 绘制文字，完成后通过 `UpdateLayeredWindow` 把整帧提交给顶层 layered window。图片从 PE 资源经 WIC 解码；阴影和透明边缘直接绘制，不依赖 Mica/Acrylic。
+HUD 使用 32 位预乘 BGRA DIB section 作为离屏表面，Direct2D DC render target 绘制卡片、渐变、圆角和图形，DirectWrite 绘制文字，完成后通过 `UpdateLayeredWindow` 把整帧提交给顶层 layered window。品牌图标字节在编译期嵌入 PE，再由 WIC 解码为 Direct2D bitmap；阴影和透明边缘直接绘制，不依赖 Mica/Acrylic。
 
 普通 HWND render target 不保证 layered window 的逐像素 alpha，直接采用它可能得到黑底或整窗不透明；DirectComposition 能提供更现代的合成路径，但会扩大设备丢失、交换链和命中测试验证面。DIB 路径更适合小尺寸、低频刷新的待办 HUD，也便于截帧与像素验证。仅在数据、尺寸、DPI 或模式变化时重绘，不建立持续动画循环。
 
@@ -96,12 +96,12 @@ PowerShell 评估脚本在同一提交和设备分别完成 WPF 自包含 Releas
 - **[纯 Win32 设置页视觉与可访问性打磨成本高]** → 先保持信息结构、键盘可用性和浅色层级一致，不追求逐像素复刻；视觉升级不得改变设置契约。
 - **[WPF 在原型启动后才被用户启动，仍可能并存]** → 验收前显式检查进程，原型写入保持原子且推进前重读；若决定产品化，再增加两个实现共享的跨进程锁。
 - **[静态 CRT 或系统投影仍使体积收益不及预期]** → 保留精确字节与依赖证据；若原生 EXE 不小于 WPF 基线，原型按规格不得替换正式实现。
-- **[C++ 手工资源生命周期引入崩溃或句柄泄漏]** → 使用 RAII 封装 COM、GDI、图标、菜单、文件和注册资源，退出后验证进程句柄与托盘图标均清理。
+- **[Rust unsafe Win32 边界或句柄生命周期出错]** → 将 unsafe 调用收敛到带 `Result` 的窄平台函数，使用所有权、`Drop` 和显式线程亲和标记管理 COM、GDI、图标、菜单、文件和注册资源，退出后验证进程句柄与托盘图标均清理。
 
 ## Migration Plan
 
-1. 先安装或确认 MSVC C++、CMake 与 Windows SDK，仅在 `windows-native/` 构建原型；现有 WPF 和 macOS 工程保持不变。
+1. 先安装或确认 Rust MSVC、MSVC 链接器与 Windows SDK，仅在 `windows-native/` 构建原型；现有 WPF 和 macOS 工程保持不变。
 2. 使用 fixtures 和原型专属设置完成自动化检查，再在 Windows 11 x64 真机按固定清单验收；验收真实任务前备份 `todos.json` 并确保 WPF 已退出。
 3. 在同一 Windows 设备重新构建 WPF 基线与原生 Release，生成评估记录并给出继续、替换或终止建议。
 4. 原型失败时只删除原生构建产物并停止使用候选 EXE，WPF 设置、默认命令和发布产物无需回滚；任务文件如被验收推进，使用验收前备份恢复。
-5. 原型通过时仍不自动迁移；另立 OpenSpec 变更处理默认构建、设置迁移、发布命名、签名与 WPF 退场。
+5. 原型通过时仍不自动迁移；另立 OpenSpec 变更处理正式默认构建、设置迁移、发布命名、签名与 WPF 退场。开发期 `make start` 继续作为 Rust 原型入口，`make build`/`make test` 和发布保持 WPF。

@@ -8,6 +8,7 @@
 #include <winrt/Windows.Data.Json.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -406,6 +407,189 @@ std::string encodeTodos(const std::vector<core::Todo>& items) {
             array.Append(object);
         }
         return wideToUtf8(array.Stringify());
+    } catch (const winrt::hresult_error& error) {
+        throw std::invalid_argument("Windows.Data.Json: " + wideToUtf8(error.message()));
+    }
+}
+
+namespace {
+
+core::HudMode parseHudMode(std::string_view value) {
+    if (value == "passthrough") return core::HudMode::Passthrough;
+    if (value == "interactive") return core::HudMode::Interactive;
+    throw std::invalid_argument("unknown HUD mode");
+}
+
+core::HudScope parseHudScope(std::string_view value) {
+    if (value == "all") return core::HudScope::All;
+    if (value == "today") return core::HudScope::Today;
+    throw std::invalid_argument("unknown HUD scope");
+}
+
+const wchar_t* hudModeName(core::HudMode mode) {
+    switch (mode) {
+    case core::HudMode::Passthrough: return L"passthrough";
+    case core::HudMode::Interactive: return L"interactive";
+    }
+    throw std::invalid_argument("invalid HUD mode");
+}
+
+const wchar_t* hudScopeName(core::HudScope scope) {
+    switch (scope) {
+    case core::HudScope::All: return L"all";
+    case core::HudScope::Today: return L"today";
+    }
+    throw std::invalid_argument("invalid HUD scope");
+}
+
+template <typename Function>
+void readSetting(const JsonObject& object, const wchar_t* name, Function&& function) {
+    if (!object.HasKey(name)) return;
+    try {
+        function(object.Lookup(name));
+    } catch (const winrt::hresult_error&) {
+        // Windows.Data.Json 类型不匹配同样只影响当前字段。
+    } catch (const std::exception&) {
+        // 单字段损坏回退到默认值；顶层 JSON 损坏仍由 Parse 抛出。
+    }
+}
+
+void insertBool(JsonObject& object, const wchar_t* name, bool value) {
+    object.Insert(name, JsonValue::CreateBooleanValue(value));
+}
+
+void insertNumber(JsonObject& object, const wchar_t* name, double value) {
+    object.Insert(name, JsonValue::CreateNumberValue(value));
+}
+
+void insertUnsigned(JsonObject& object, const wchar_t* name, std::uint32_t value) {
+    object.Insert(name, JsonValue::CreateNumberValue(static_cast<double>(value)));
+}
+
+} // namespace
+
+core::HudSettings decodeSettings(std::string_view utf8_json) {
+    try {
+        const auto object = JsonObject::Parse(winrt::hstring(utf8ToWide(utf8_json)));
+        core::HudSettings settings;
+        readSetting(object, L"isVisible", [&](const auto& value) {
+            if (value.ValueType() != JsonValueType::Boolean) throw std::invalid_argument("isVisible is not boolean");
+            settings.visible = value.GetBoolean();
+        });
+        readSetting(object, L"launchAtLogin", [&](const auto& value) {
+            if (value.ValueType() != JsonValueType::Boolean) throw std::invalid_argument("launchAtLogin is not boolean");
+            settings.launch_at_login = value.GetBoolean();
+        });
+        readSetting(object, L"mode", [&](const auto& value) {
+            if (value.ValueType() != JsonValueType::String) throw std::invalid_argument("mode is not string");
+            settings.mode = parseHudMode(wideToUtf8(value.GetString()));
+        });
+        readSetting(object, L"opacity", [&](const auto& value) {
+            if (value.ValueType() != JsonValueType::Number) throw std::invalid_argument("opacity is not number");
+            settings.opacity = value.GetNumber();
+        });
+        readSetting(object, L"isTopmost", [&](const auto& value) {
+            if (value.ValueType() != JsonValueType::Boolean) throw std::invalid_argument("isTopmost is not boolean");
+            settings.topmost = value.GetBoolean();
+        });
+        readSetting(object, L"scope", [&](const auto& value) {
+            if (value.ValueType() != JsonValueType::String) throw std::invalid_argument("scope is not string");
+            settings.scope = parseHudScope(wideToUtf8(value.GetString()));
+        });
+        readSetting(object, L"maxItems", [&](const auto& value) {
+            if (value.ValueType() != JsonValueType::Number) throw std::invalid_argument("maxItems is not number");
+            settings.max_items = static_cast<int>(value.GetNumber());
+        });
+        readSetting(object, L"hudModeHotKeyEnabled", [&](const auto& value) {
+            if (value.ValueType() != JsonValueType::Boolean) throw std::invalid_argument("hotkey enabled is not boolean");
+            settings.hotkey_enabled = value.GetBoolean();
+        });
+        readSetting(object, L"hudModeHotKeyShortcut", [&](const auto& value) {
+            if (value.ValueType() == JsonValueType::Null) {
+                settings.hotkey_modifiers = 0;
+                settings.hotkey_key = 0;
+                return;
+            }
+            if (value.ValueType() != JsonValueType::Object) throw std::invalid_argument("hotkey shortcut is not object");
+            const auto shortcut = value.GetObject();
+            if (shortcut.HasKey(L"modifiers")) {
+                const auto modifiers = shortcut.Lookup(L"modifiers");
+                if (modifiers.ValueType() != JsonValueType::Number) throw std::invalid_argument("hotkey modifiers is not number");
+                settings.hotkey_modifiers = static_cast<std::uint32_t>(modifiers.GetNumber());
+            }
+            if (shortcut.HasKey(L"key")) {
+                const auto key = shortcut.Lookup(L"key");
+                if (key.ValueType() != JsonValueType::Number) throw std::invalid_argument("hotkey key is not number");
+                settings.hotkey_key = static_cast<std::uint32_t>(key.GetNumber());
+            }
+        });
+        readSetting(object, L"placement", [&](const auto& value) {
+            if (value.ValueType() != JsonValueType::Object) throw std::invalid_argument("placement is not object");
+            const auto placement = value.GetObject();
+            readSetting(placement, L"monitorId", [&](const auto& item) {
+                if (item.ValueType() == JsonValueType::Null) {
+                    settings.placement.monitor_id.clear();
+                    return;
+                }
+                if (item.ValueType() != JsonValueType::String) throw std::invalid_argument("monitorId is not string");
+                settings.placement.monitor_id = wideToUtf8(item.GetString());
+            });
+            readSetting(placement, L"relativeX", [&](const auto& item) {
+                if (item.ValueType() != JsonValueType::Number) throw std::invalid_argument("relativeX is not number");
+                settings.placement.relative_x = item.GetNumber();
+            });
+            readSetting(placement, L"relativeY", [&](const auto& item) {
+                if (item.ValueType() != JsonValueType::Number) throw std::invalid_argument("relativeY is not number");
+                settings.placement.relative_y = item.GetNumber();
+            });
+            readSetting(placement, L"logicalWidth", [&](const auto& item) {
+                if (item.ValueType() != JsonValueType::Number) throw std::invalid_argument("logicalWidth is not number");
+                settings.placement.logical_width = item.GetNumber();
+            });
+            readSetting(placement, L"logicalHeight", [&](const auto& item) {
+                if (item.ValueType() != JsonValueType::Number) throw std::invalid_argument("logicalHeight is not number");
+                settings.placement.logical_height = item.GetNumber();
+            });
+            readSetting(placement, L"dpi", [&](const auto& item) {
+                if (item.ValueType() != JsonValueType::Number) throw std::invalid_argument("dpi is not number");
+                settings.placement.dpi = static_cast<std::uint32_t>(item.GetNumber());
+            });
+        });
+        return core::normalize(settings);
+    } catch (const winrt::hresult_error& error) {
+        throw std::invalid_argument("Windows.Data.Json: " + wideToUtf8(error.message()));
+    }
+}
+
+std::string encodeSettings(const core::HudSettings& raw_settings) {
+    try {
+        const auto settings = core::normalize(raw_settings);
+        JsonObject object;
+        insertBool(object, L"isVisible", settings.visible);
+        insertBool(object, L"launchAtLogin", settings.launch_at_login);
+        insertString(object, L"mode", wideToUtf8String(hudModeName(settings.mode)));
+        insertNumber(object, L"opacity", settings.opacity);
+        insertBool(object, L"isTopmost", settings.topmost);
+        insertString(object, L"scope", wideToUtf8String(hudScopeName(settings.scope)));
+        object.Insert(L"maxItems", JsonValue::CreateNumberValue(settings.max_items));
+        insertBool(object, L"hudModeHotKeyEnabled", settings.hotkey_enabled);
+        if (settings.hotkey_enabled) {
+            JsonObject shortcut;
+            insertUnsigned(shortcut, L"modifiers", settings.hotkey_modifiers);
+            insertUnsigned(shortcut, L"key", settings.hotkey_key);
+            object.Insert(L"hudModeHotKeyShortcut", shortcut);
+        } else {
+            object.Insert(L"hudModeHotKeyShortcut", JsonValue::CreateNullValue());
+        }
+        JsonObject placement;
+        insertString(placement, L"monitorId", settings.placement.monitor_id);
+        insertNumber(placement, L"relativeX", settings.placement.relative_x);
+        insertNumber(placement, L"relativeY", settings.placement.relative_y);
+        insertNumber(placement, L"logicalWidth", settings.placement.logical_width);
+        insertNumber(placement, L"logicalHeight", settings.placement.logical_height);
+        insertUnsigned(placement, L"dpi", settings.placement.dpi);
+        object.Insert(L"placement", placement);
+        return wideToUtf8(object.Stringify());
     } catch (const winrt::hresult_error& error) {
         throw std::invalid_argument("Windows.Data.Json: " + wideToUtf8(error.message()));
     }
