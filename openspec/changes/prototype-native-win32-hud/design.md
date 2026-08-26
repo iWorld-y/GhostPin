@@ -26,7 +26,7 @@
 
 在 `windows-native/` 建立独立 Cargo 工程，生成 `GhostPin.Native.exe`、无 UI 依赖的 Rust Core 模块和行为检查可执行程序。Release 固定 `x86_64-pc-windows-msvc`，启用静态 CRT、LTO、符号剥离和资源编译，品牌图标与 manifest 编译进 PE，因此分发物只包含一个 EXE。
 
-选择 Cargo/windows-rs 是为了用 Rust 所有权、`Result` 和 `Drop` 管理 Win32/COM/GDI 生命周期，同时不把原型接入现有 .NET solution。保留的 CMake 文件仅作为原始 C++ 评估记录，不参与当前 Rust Release 入口；Qt、WinUI 3 和 Windows App SDK 会重新引入用户正在评估的运行时或框架负担。
+选择 Cargo/windows-rs 是为了用 Rust 所有权、`Result` 和 `Drop` 管理 Win32/COM/GDI 生命周期，同时不把原型接入现有 .NET solution。Windows 原生目录不保留 C++/CMake 构建路径；Qt、WinUI 3 和 Windows App SDK 会重新引入用户正在评估的运行时或框架负担。
 
 ### 2. 按领域、存储、平台、渲染和编排拆分职责
 

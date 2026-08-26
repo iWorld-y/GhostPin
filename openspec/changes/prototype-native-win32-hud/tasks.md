@@ -54,3 +54,4 @@
 ## 7. Windows 原生化收敛
 
 - [x] 7.1 移除旧 `windows/` WPF 工程及 .NET 打包入口，迁移原生 fixtures，切换 Makefile、Windows Release workflow、文档和评估脚本至 Rust/windows-rs 实现
+- [x] 7.2 删除遗留 C++ 源码、头文件、CMake 构建入口及交互检查脚本，保持 macOS 工程不变
