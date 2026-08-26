@@ -1,6 +1,6 @@
 ## Purpose
 
-定义 GhostPin 原生 Windows HUD 原型的可启动产物、核心交互兼容性、数据安全边界与量化评估方式，为是否替换现有 WPF 实现提供可复现证据。
+定义 GhostPin 原生 Windows HUD 的可启动产物、核心交互兼容性、数据安全边界与量化评估方式。
 
 ## ADDED Requirements
 
@@ -11,16 +11,16 @@
 - **WHEN** 用户把 Release 原型 EXE 复制到仅包含 Windows 系统组件且未安装 .NET 或 Visual C++ Redistributable 的 Windows 11 x64 账户并启动
 - **THEN** 系统显示 GhostPin 通知区域图标和 HUD，且不会因缺少额外运行时或同目录文件而失败
 
-### Requirement: 与 WPF 实现隔离运行
-原生原型 SHALL 使用独立的进程身份和设置文件，并 MUST NOT 覆盖现有 WPF 设置。原生原型检测到 WPF GhostPin 正在运行时 MUST 拒绝进入任务读写生命周期，并 SHALL 给出可诊断提示。
+### Requirement: 原生单实例与本地设置
+原生客户端 SHALL 使用独立的进程身份和设置文件，并 MUST NOT 覆盖任务文件之外的其他配置。检测到自身已运行时 MUST 拒绝重复进入任务读写生命周期，并 SHALL 给出可诊断提示。
 
-#### Scenario: WPF GhostPin 已经运行
-- **WHEN** 用户在现有 WPF GhostPin 仍在运行时启动原生原型
-- **THEN** 原生原型提示用户先退出 WPF 版本并结束自身，且不修改任务文件或任一版本的设置
+#### Scenario: 原生客户端已经运行
+- **WHEN** 用户再次启动原生 GhostPin
+- **THEN** 新进程提示原生版本已经在运行并结束，且不修改任务或设置
 
-#### Scenario: 单独启动原生原型
-- **WHEN** WPF GhostPin 未运行且用户启动原生原型
-- **THEN** 原生原型读取 `%LOCALAPPDATA%\GhostPin\todos.json`，并只从原型专属设置文件恢复 HUD 偏好
+#### Scenario: 首次启动原生客户端
+- **WHEN** 原生 GhostPin 尚未运行且没有可用设置
+- **THEN** 客户端读取 `%LOCALAPPDATA%\GhostPin\todos.json`，并从 `native-settings.json` 使用安全默认值恢复 HUD 偏好
 
 ### Requirement: 原生 HUD 窗口语义
 原生 HUD SHALL 是无系统边框、背景逐像素透明且不出现在任务栏或 Alt+Tab 中的工具窗口。HUD 默认 SHALL 置顶并处于穿透模式；穿透模式下输入 MUST 交给下层应用且 HUD MUST NOT 抢占焦点，交互模式下 SHALL 支持任务按钮、拖动与八方向缩放。
@@ -108,19 +108,19 @@
 - **THEN** HUD 在主显示器可见区域内恢复，并将尺寸限制在合法范围
 
 ### Requirement: 可复现的原型评估
-系统 SHALL 用同一提交、Release x64 配置和同一 Windows 设备记录原生原型与当前 WPF 自包含版本的 EXE 精确字节数、发布文件数量、HUD 可见启动耗时和稳定后的工作集内存，并 SHALL 记录核心行为人工验收结果。评估结果 MUST 明确原生方案相对 WPF 的差值、失败项和继续、替换或终止建议。
+系统 SHALL 用同一提交、Release x64 配置和同一 Windows 设备记录原生 EXE 精确字节数、发布文件数量、HUD 可见启动耗时和稳定后的工作集内存，并 SHALL 记录核心行为人工验收结果。
 
-#### Scenario: 生成对照结果
-- **WHEN** 两个实现均完成 Release 构建并在相同设备完成规定次数的采样
-- **THEN** 仓库中的评估记录包含原始数据、采样命令、环境、汇总值、相对差值和可复现步骤
+#### Scenario: 生成原生评估结果
+- **WHEN** 原生实现完成 Release 构建并在目标设备完成规定次数的采样
+- **THEN** 仓库中的评估记录包含原始数据、采样命令、环境、汇总值和可复现步骤
 
-#### Scenario: 原型未通过决策门槛
-- **WHEN** 任一核心窗口、数据安全或设置交互验收失败，或原生单文件 EXE 不小于 WPF 自包含 EXE
-- **THEN** 当前 WPF 实现和发布流程保持不变，评估记录明确失败原因且不得把原型切换为正式 Windows 产物
+#### Scenario: 原生客户端未通过验收
+- **WHEN** 任一核心窗口、数据安全或设置交互验收失败
+- **THEN** 评估记录明确失败原因并阻止发布该构建
 
-### Requirement: 原型不进入正式发布
-本变更期间，Windows `make build`、`make test` 和 GitHub Release SHALL 继续使用现有 WPF 实现；开发命令 `make start` SHALL 明确启动 Rust 原生原型以支持验收。原生原型 MUST NOT 替换正式下载、删除 WPF 项目或改变 macOS 行为；正式切换 SHALL 通过后续独立变更决定。
+### Requirement: 原生实现进入 Windows 构建与发布
+本变更期间，Windows `make build`、`make test`、`make start`、`make package` 和 GitHub Release SHALL 使用 Rust 原生实现。原生客户端 MUST NOT 改变 macOS 行为；Windows 正式签名、安装器与自动更新可通过后续独立变更扩展。
 
 #### Scenario: 完成本变更
-- **WHEN** 原生原型、测试和评估记录完成
-- **THEN** 当前 Windows 发布仍产出既有 WPF EXE，macOS 构建与 DMG 不变，原生方案仅作为已验证的候选实现存在
+- **WHEN** 原生客户端、测试和评估记录完成
+- **THEN** Windows 发布产出原生单文件 EXE，macOS 构建与 DMG 不变

@@ -131,22 +131,24 @@ jobs:
           ref: ${{ github.ref }}
           fetch-depth: 1
 
-      - name: Set up .NET 10
-        uses: actions/setup-dotnet@v5
+      - name: Set up Rust MSVC
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
-          dotnet-version: 10.0.x
+          toolchain: stable-x86_64-pc-windows-msvc
 
       - name: Print build toolchain
         shell: pwsh
-        run: dotnet --info
+        run: |
+          rustc --version
+          cargo --version
 
       - name: Run Windows tests
-        shell: pwsh
-        run: dotnet test windows/GhostPin.Windows.sln --configuration Release -p:NuGetAudit=false
+        shell: cmd
+        run: windows-native\test.cmd
 
       - name: Build and package Windows EXE
         shell: pwsh
-        run: ./script/package_windows.ps1
+        run: ./windows-native/script/package.ps1
 
       - name: Smoke-test Windows EXE
         shell: pwsh

@@ -15,11 +15,11 @@
 
 ## 3. 原生存储与文件刷新
 
-- [x] 3.1 实现 `%LOCALAPPDATA%\GhostPin\todos.json` 与 `native-settings.json` 路径解析和目录初始化，测试设置与现有 WPF 文件完全隔离
+- [x] 3.1 实现 `%LOCALAPPDATA%\GhostPin\todos.json` 与 `native-settings.json` 路径解析和目录初始化，测试任务与原生设置文件路径隔离
 - [x] 3.2 实现串行任务仓储、最后有效快照、推进前重读、同目录临时写入、`FlushFileBuffers` 和原子替换，测试缺失文件、损坏文件、UUID 竞争及写回兼容性
 - [x] 3.3 使用 `ReadDirectoryChangesW` 实现目录级创建、修改、删除、重命名和溢出监听，通过消息窗口执行 500ms 防抖和完整重载
 - [ ] 3.4 通过集成检查验证外部原子替换、重复事件合并、自身写入去重、暂时损坏后恢复，以及刷新路径不触发窗口显示或激活
-- [x] 3.5 实现原型命名 mutex 和当前用户会话 WPF 进程检测，验证冲突时在初始化仓储前退出且不修改任务或设置
+- [x] 3.5 实现原生命名 mutex，验证重复启动时在初始化仓储前退出且不修改任务或设置
 
 ## 4. HWND 与 Direct2D HUD
 
@@ -45,8 +45,12 @@
 - [ ] 6.3 在未安装 .NET 和 Visual C++ Redistributable 的干净 Windows 11 x64 环境启动单个 EXE，验证 HUD、托盘、退出和缺失任务文件的首次启动路径
 - [ ] 6.4 人工验证默认穿透点击下层、焦点保持、任务栏/Alt+Tab 隐藏、交互按钮、拖动、八方向缩放、置顶、托盘生命周期、双页设置和全局快捷键
 - [ ] 6.5 在 100%、150%、200% DPI、负坐标双显示器和显示器断开场景验证透明边缘、文字清晰度、命中区域、跨屏移动及重启恢复
-- [ ] 6.6 备份测试任务文件并确认 WPF 已退出后，人工验证外部创建、修改、原子替换、短暂损坏恢复、状态推进竞争和 500ms 冷却，结束后恢复测试前数据
-- [x] 6.7 实现可重复评估脚本，在同一提交、设备和 Release x64 配置下多次采集 WPF 与原生 EXE 精确字节数、发布文件数、HUD 可见启动耗时和稳定工作集
-- [ ] 6.8 在 `docs/windows-native-hud-evaluation.md` 记录原始样本、环境、命令、汇总值、相对差值、人工验收结果和继续/替换/终止建议，未通过门槛时明确保留 WPF
-- [x] 6.9 重新运行现有 Windows WPF 构建与测试，确认 `make build`/`make test`、Release workflow、正式 EXE 和 macOS 工程均未被原型改写，并确认开发期 `make start` 明确启动 Rust 原型
+- [ ] 6.6 备份测试任务文件，人工验证外部创建、修改、原子替换、短暂损坏恢复、状态推进竞争和 500ms 冷却，结束后恢复测试前数据
+- [x] 6.7 实现可重复评估脚本，在同一提交、设备和 Release x64 配置下多次采集原生 EXE 精确字节数、发布文件数、HUD 可见启动耗时和稳定工作集
+- [ ] 6.8 在 `docs/windows-native-hud-evaluation.md` 记录原始样本、环境、命令、汇总值、人工验收结果和发布建议
+- [x] 6.9 重新运行 Windows 原生构建与测试，确认 `make build`/`make test`/`make package`、Release workflow 和 macOS 工程均正常，并确认 `make start` 明确启动 Rust 原生客户端
 - [x] 6.10 运行 `openspec validate prototype-native-win32-hud --strict` 和全量严格校验，检查最终 diff 只包含原型、评估及明确规划范围，不提交构建产物
+
+## 7. Windows 原生化收敛
+
+- [x] 7.1 移除旧 `windows/` WPF 工程及 .NET 打包入口，迁移原生 fixtures，切换 Makefile、Windows Release workflow、文档和评估脚本至 Rust/windows-rs 实现

@@ -4,7 +4,7 @@
 
 ### Added
 
-- 新增 Windows 原生版本，使用 C# WPF 与 Win32 实现桌面幽灵 HUD、托盘菜单和设置窗口。
+- 新增 Windows 原生版本，使用 Rust/windows-rs、Win32 与 Direct2D 实现桌面幽灵 HUD、托盘菜单和设置窗口。
 - Windows HUD 支持穿透/交互模式、任务状态推进、显示范围与屏幕位置设置，以及可选全局快捷键。
 - GitHub Release 同时提供 macOS DMG 与 Windows x64 单文件 EXE，可直接下载运行。
 

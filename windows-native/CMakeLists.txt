@@ -102,7 +102,7 @@ add_executable(GhostPin.Native.RepositoryChecks src/repository_checks.cpp)
 target_link_libraries(GhostPin.Native.RepositoryChecks PRIVATE GhostPin.Native.Repository)
 
 set(NATIVE_FIXTURE_SOURCE_DIR
-    "${CMAKE_CURRENT_SOURCE_DIR}/../windows/tests/GhostPin.Windows.Core.Tests/Fixtures")
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 set(NATIVE_FIXTURE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/tests")
 file(MAKE_DIRECTORY "${NATIVE_FIXTURE_BINARY_DIR}")
 configure_file(

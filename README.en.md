@@ -6,7 +6,7 @@
 
 **English** · [中文](README.md)
 
-GhostPin is an **Agent-native**, local-first macOS menu bar todo app, with a WPF + Win32 Windows build. On macOS, agents manage tasks through the command-line tool shipped with the app; the app displays a desktop ghost HUD, watches the local file, and sends notifications. Data stays local. Requires macOS 14+ and Swift 6 on macOS.
+GhostPin is an **Agent-native**, local-first macOS menu bar todo app, with a native Windows build powered by Rust/windows-rs and Win32. On macOS, agents manage tasks through the command-line tool shipped with the app; the app displays a desktop ghost HUD, watches the local file, and sends notifications. Data stays local. Requires macOS 14+ and Swift 6 on macOS.
 
 ## Design: Agent Native
 
@@ -48,7 +48,7 @@ When upgrading from an older version, the first access copies `~/Library/Applica
 Download the latest release asset for your platform from GitHub Releases:
 
 - macOS: `GhostPin-<version>.dmg`; open it and drag GhostPin.app into Applications.
-- Windows 11 x64: `GhostPin-<version>-windows-x64.exe`; it is a self-contained single file that runs directly without installing .NET or extracting an archive.
+- Windows 11 x64: `GhostPin-<version>-windows-x64.exe`; it is a native Rust self-contained single file that runs directly without installing .NET, the Visual C++ Redistributable, or extracting an archive.
 
 Public macOS builds are currently ad-hoc signed, so macOS may warn that the developer cannot be verified. The Windows EXE is currently unsigned with Authenticode, so Windows SmartScreen may show a security warning.
 
@@ -104,7 +104,8 @@ macOS requirements:
 Windows requirements:
 
 - Windows 11 x64
-- .NET 10 SDK (including the Windows Desktop SDK)
+- Rust MSVC toolchain
+- Visual Studio Build Tools (MSVC and Windows SDK; required only to build from source)
 
 For day-to-day development, use the Makefile:
 
@@ -127,7 +128,7 @@ swift run GhostPinCoreChecks
 ./script/build_and_run.sh --verify
 ./script/package_dmg.sh
 # Windows: PowerShell
-./script/package_windows.ps1
+./windows-native/script/package.ps1
 ```
 
 `make package` detects the current platform: macOS produces `GhostPin-<version>.dmg`, while Windows produces `GhostPin-<version>-windows-x64.exe`. Releases are built by GitHub Actions on macOS and Windows. Update script/VERSION, then run:
@@ -150,7 +151,7 @@ Sources/GhostPinCore/         todo, reminder, parsing, and storage logic
 Sources/GhostPinCLI/          ghostpin-cli command-line tool
 Sources/GhostPin/Resources/   app icon and logo
 Tests/GhostPinCoreChecks/     executable core behavior checks
-windows/src/                 Windows WPF + Win32 app and core logic
+windows-native/              Rust/windows-rs native Windows HUD, core, and checks
 script/                      app packaging and release scripts
 ```
 
