@@ -12,7 +12,6 @@
 #include <shellapi.h>
 #include <shellscalingapi.h>
 #include <commctrl.h>
-#include <tlhelp32.h>
 #include <winreg.h>
 #include <windowsx.h>
 #include <wrl/client.h>
@@ -59,49 +58,11 @@ constexpr int kDefaultHeight = 460;
 constexpr int kMinimumWidth = 300;
 constexpr int kMinimumHeight = 280;
 constexpr wchar_t kNativeMutexName[] = L"Local\\GhostPin.Native.App";
-constexpr wchar_t kWpfProcessName[] = L"GhostPin.Windows.App.exe";
 
 void requireHresult(HRESULT result, const char* operation) {
     if (FAILED(result)) {
         throw std::system_error(static_cast<int>(result), std::system_category(), operation);
     }
-}
-
-bool wpfProcessRunning() {
-    const HANDLE raw_snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (raw_snapshot == INVALID_HANDLE_VALUE) {
-        throw std::system_error(static_cast<int>(GetLastError()),
-            std::system_category(), "CreateToolhelp32Snapshot");
-    }
-    platform::unique_handle snapshot(raw_snapshot);
-    DWORD current_session = 0;
-    if (!ProcessIdToSessionId(GetCurrentProcessId(), &current_session)) {
-        throw std::system_error(static_cast<int>(GetLastError()),
-            std::system_category(), "ProcessIdToSessionId(current)");
-    }
-    PROCESSENTRY32W entry{};
-    entry.dwSize = sizeof(entry);
-    if (!Process32FirstW(snapshot.get(), &entry)) {
-        const DWORD error = GetLastError();
-        if (error == ERROR_NO_MORE_FILES) return false;
-        throw std::system_error(static_cast<int>(error), std::system_category(), "Process32FirstW");
-    }
-    do {
-        DWORD process_session = 0;
-        if (_wcsicmp(entry.szExeFile, kWpfProcessName) == 0 &&
-            entry.th32ProcessID != GetCurrentProcessId()) {
-            if (!ProcessIdToSessionId(entry.th32ProcessID, &process_session)) {
-                throw std::system_error(static_cast<int>(GetLastError()),
-                    std::system_category(), "ProcessIdToSessionId(process)");
-            }
-            if (process_session == current_session) return true;
-        }
-    } while (Process32NextW(snapshot.get(), &entry));
-    const DWORD error = GetLastError();
-    if (error != ERROR_NO_MORE_FILES && error != ERROR_SUCCESS) {
-        throw std::system_error(static_cast<int>(error), std::system_category(), "Process32NextW");
-    }
-    return false;
 }
 
 std::string readUtf8File(const std::filesystem::path& path) {
@@ -1308,18 +1269,6 @@ int Controller::run(HINSTANCE instance, int) const {
     if (mutex_error == ERROR_ALREADY_EXISTS) {
         MessageBoxW(nullptr, L"GhostPin 原生版本已经在运行。", L"GhostPin", MB_OK | MB_ICONINFORMATION);
         return 2;
-    }
-    bool wpf_running = false;
-    try {
-        wpf_running = wpfProcessRunning();
-    } catch (const std::exception& error) {
-        MessageBoxA(nullptr, error.what(), "GhostPin", MB_OK | MB_ICONERROR);
-        return 4;
-    }
-    if (wpf_running) {
-        MessageBoxW(nullptr, L"请先退出 WPF 版 GhostPin，再启动原生版本。",
-            L"GhostPin", MB_OK | MB_ICONWARNING);
-        return 3;
     }
     const auto paths = storage::resolveLocalAppData();
     storage::ensureDirectory(paths);

@@ -1,9 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$NativeExe,
-    [Parameter(Mandatory = $true)]
-    [string]$WpfExe,
-    [string]$WpfPublishDir,
     [ValidateRange(1, 20)]
     [int]$Samples = 3,
     [ValidateRange(1, 60)]
@@ -82,15 +79,12 @@ function Measure-Launch([string]$ExePath, [int]$Warmup) {
 }
 
 $nativePath = Resolve-ExistingPath $NativeExe
-$wpfPath = Resolve-ExistingPath $WpfExe
 $nativeSummary = Get-ArtifactSummary $nativePath $null
-$wpfSummary = Get-ArtifactSummary $wpfPath $WpfPublishDir
 $samples = @()
 for ($index = 1; $index -le $Samples; $index++) {
     $samples += [ordered]@{
         index = $index
         native = Measure-Launch $nativePath $WarmupSeconds
-        wpf = Measure-Launch $wpfPath $WarmupSeconds
     }
 }
 
@@ -102,7 +96,6 @@ $result = [ordered]@{
     samples = $Samples
     warmupSeconds = $WarmupSeconds
     native = $nativeSummary
-    wpf = $wpfSummary
     launches = $samples
 }
 $parent = Split-Path -Parent $OutputPath

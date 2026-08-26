@@ -48,8 +48,7 @@ Storage 的公开头只暴露普通 C++ 字符串、Core 模型和 `RuntimeApart
 `GhostPin.Native.StoragePathsChecks` target，保持全局 C++20、`/permissive-`、`/MT`、
 `/W4`、`/WX`，不继承 JSON Storage 的 C++17 `/await` 兼容例外。系统 LocalAppData
 通过 `SHGetKnownFolderPath(FOLDERID_LocalAppData)` 获取；检查只注入临时 root，绝不解析
-或写入真实用户任务/设置文件。原生设置文件名固定为 `native-settings.json`，与 WPF 的
-`settings.json` 隔离。
+或写入真实用户任务/设置文件。原生设置文件名固定为 `native-settings.json`。
 
 ## Rust + windows-rs 阶段记录（2026-08-25）
 

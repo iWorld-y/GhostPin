@@ -6,7 +6,7 @@
 
 **中文** · [English](README.en.md)
 
-GhostPin 是一个 **Agent native** 的本地优先 macOS 菜单栏待办应用，同时提供 WPF + Win32 的 Windows 版本。macOS 任务由 Agent 通过随应用分发的命令行工具管理，应用本身负责展示桌面幽灵 HUD、文件监听和本地通知。纯本地存储，无云同步。macOS 最低支持 14，工具链为 Swift 6。
+GhostPin 是一个 **Agent native** 的本地优先 macOS 菜单栏待办应用，同时提供基于 Rust/windows-rs + Win32 的 Windows 原生版本。macOS 任务由 Agent 通过随应用分发的命令行工具管理，应用本身负责展示桌面幽灵 HUD、文件监听和本地通知。纯本地存储，无云同步。macOS 最低支持 14，工具链为 Swift 6。
 
 ## 设计理念：Agent Native
 
@@ -48,7 +48,7 @@ GhostPin 采用本地优先设计。
 从 GitHub Releases 页面按平台下载最新版本：
 
 - macOS：`GhostPin-<版本号>.dmg`，打开后把 GhostPin.app 拖入 Applications。
-- Windows 11 x64：`GhostPin-<版本号>-windows-x64.exe`，这是自包含单文件，直接下载运行，无需安装 .NET 或解压。
+- Windows 11 x64：`GhostPin-<版本号>-windows-x64.exe`，这是 Rust 原生自包含单文件，直接下载运行，无需安装 .NET、Visual C++ Redistributable 或解压。
 
 当前 macOS 公开发布为 ad-hoc 签名，macOS 门禁可能提示“无法验证开发者”；Windows EXE 当前未配置 Authenticode 签名，Windows SmartScreen 可能显示安全提示。
 
@@ -104,7 +104,8 @@ macOS 环境要求：
 Windows 环境要求：
 
 - Windows 11 x64
-- .NET 10 SDK（包含 Windows Desktop SDK）
+- Rust MSVC 工具链
+- Visual Studio Build Tools（MSVC 与 Windows SDK，仅源码构建需要）
 
 日常开发建议使用 Makefile：
 
@@ -127,7 +128,7 @@ swift run GhostPinCoreChecks
 ./script/build_and_run.sh --verify
 ./script/package_dmg.sh
 # Windows：PowerShell
-./script/package_windows.ps1
+./windows-native/script/package.ps1
 ```
 
 `make package` 会自动识别当前平台：macOS 生成 `GhostPin-<版本号>.dmg`，Windows 生成 `GhostPin-<版本号>-windows-x64.exe`。正式版本发布由 GitHub Actions 在 macOS 与 Windows runner 上完成；发布前只修改 script/VERSION，然后执行：
@@ -150,7 +151,7 @@ Sources/GhostPinCore/         待办、提醒、解析与存储的核心逻辑
 Sources/GhostPinCLI/          ghostpin-cli 命令行工具
 Sources/GhostPin/Resources/   应用图标与 Logo
 Tests/GhostPinCoreChecks/     可执行核心行为检查
-windows/src/                 Windows WPF + Win32 应用与核心逻辑
+windows-native/              Rust/windows-rs Windows 原生 HUD、Core 与检查
 script/                      应用打包与发布脚本
 ```
 

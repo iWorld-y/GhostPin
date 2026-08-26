@@ -19,18 +19,15 @@ if errorlevel 1 (
 
 set "CARGO=%USERPROFILE%\.cargo\bin\cargo.exe"
 if not exist "%CARGO%" set "CARGO=cargo"
-"%CARGO%" build --manifest-path "%~dp0Cargo.toml" --release --bin ghostpin-native
+"%CARGO%" test --manifest-path "%~dp0Cargo.toml"
 if errorlevel 1 (
     popd
     exit /b 20
 )
-
-if not exist "%~dp0build-stage1" mkdir "%~dp0build-stage1"
-copy /Y "%~dp0target\release\ghostpin-native.exe" "%~dp0build-stage1\GhostPin.Native.exe" >NUL
+"%CARGO%" run --manifest-path "%~dp0Cargo.toml" --bin ghostpin-native-core-checks
 if errorlevel 1 (
     popd
     exit /b 30
 )
-echo Rust 原生 Release 已生成：%~dp0build-stage1\GhostPin.Native.exe
 popd
 exit /b 0

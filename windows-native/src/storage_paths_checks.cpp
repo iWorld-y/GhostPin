@@ -81,7 +81,7 @@ int main() {
             paths.native_settings_file.filename() == std::filesystem::path(L"native-settings.json"),
             "native settings uses prototype-specific filename", checks)) return 1;
         if (!expect(paths.native_settings_file != expected_root / L"settings.json",
-            "native settings is isolated from WPF settings", checks)) return 1;
+            "native settings uses a dedicated filename", checks)) return 1;
         if (!expect(paths.todos_file != paths.native_settings_file,
             "tasks and settings paths are distinct", checks)) return 1;
 
@@ -92,7 +92,7 @@ int main() {
         if (!expect(resolved.todos_file.filename() == std::filesystem::path(L"todos.json") &&
             resolved.native_settings_file.filename() == std::filesystem::path(L"native-settings.json") &&
             resolved.native_settings_file != resolved.root_directory / L"settings.json",
-            "system paths keep native settings isolated", checks)) return 1;
+            "system paths keep the dedicated native settings filename", checks)) return 1;
 
         ghostpin::storage::ensureDirectory(paths);
         if (!expect(std::filesystem::is_directory(paths.root_directory),

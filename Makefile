@@ -1,15 +1,8 @@
 APP_NAME := GhostPin
-WINDOWS_APP_NAME := GhostPin.Windows.App
-WINDOWS_SOLUTION := windows/GhostPin.Windows.sln
-WINDOWS_APP_PROJECT := windows/src/GhostPin.Windows.App/GhostPin.Windows.App.csproj
-WINDOWS_APP_BINARY = windows/src/GhostPin.Windows.App/bin/$(CONFIGURATION)/net10.0-windows/win-x64/$(WINDOWS_APP_NAME).exe
 WINDOWS_NATIVE_ROOT := windows-native
 WINDOWS_NATIVE_BUILD := $(WINDOWS_NATIVE_ROOT)/build-stage1
 WINDOWS_NATIVE_EXE := $(WINDOWS_NATIVE_BUILD)/GhostPin.Native.exe
 WINDOWS_NATIVE_BUILD_SCRIPT := $(WINDOWS_NATIVE_ROOT)/build_stage1.cmd
-
-CONFIGURATION ?= Debug
-NUGET_AUDIT ?= false
 
 ifeq ($(OS),Windows_NT)
 HOST_PLATFORM := windows
@@ -57,15 +50,15 @@ release: ## 发布新版本(先修改 script/VERSION 与 CHANGELOG,再执行)
 ifeq ($(HOST_PLATFORM),windows)
 
 help:
-	@echo GhostPin Windows development commands
+	@echo GhostPin Windows native development commands
 	@echo make dev          构建并启动原生开发版 App
 	@echo make restart      构建并重启原生开发版 App
 	@echo make stop         停止原生 Windows App
-	@echo make build        构建 WPF 回退版 Windows App
-	@echo make test         运行 WPF 回退版测试
+	@echo make build        构建 Rust 原生 Release App
+	@echo make test         运行 Rust 核心行为检查
 	@echo make verify       构建、启动并验证原生 App 进程
-	@echo make package      打包 WPF 回退版 Windows App
-	@echo 原生构建脚本固定使用 Release；正式发布暂不包含原生客户端
+	@echo make package      打包 Rust 原生 Windows EXE
+	@echo 原生构建脚本固定使用 Release；分发物为单个 x64 EXE
 
 start:
 	@call $(WINDOWS_NATIVE_BUILD_SCRIPT)
@@ -78,19 +71,19 @@ stop:
 	@echo 原生 Windows App 已停止（如果正在运行）
 
 build:
-	@dotnet build $(WINDOWS_SOLUTION) --configuration $(CONFIGURATION) -p:NuGetAudit=$(NUGET_AUDIT)
+	@call $(WINDOWS_NATIVE_BUILD_SCRIPT)
 
 test:
-	@dotnet test $(WINDOWS_SOLUTION) --configuration $(CONFIGURATION) -p:NuGetAudit=$(NUGET_AUDIT)
+	@call $(WINDOWS_NATIVE_ROOT)\test.cmd
 
 verify: start
 	@powershell -NoProfile -Command "$$deadline = (Get-Date).AddSeconds(5); do { if (Get-Process -Name 'GhostPin.Native' -ErrorAction SilentlyContinue) { exit 0 }; Start-Sleep -Milliseconds 500 } while ((Get-Date) -lt $$deadline); exit 1"
 
 package:
-	@powershell -NoProfile -ExecutionPolicy Bypass -File script/package_windows.ps1
+	@powershell -NoProfile -ExecutionPolicy Bypass -File $(WINDOWS_NATIVE_ROOT)/script/package.ps1
 
 logs telemetry cli dmg release:
-	@echo $@ 仅支持 macOS；Windows MVP 暂未提供该能力。
+	@echo $@ 仅支持 macOS；Windows 暂未提供该能力。
 	@exit 2
 
 else ifeq ($(HOST_PLATFORM),macos)
