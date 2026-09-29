@@ -9,5 +9,3 @@ DerivedData/
 Sources/TodoPin/Resources/Models/*.bin
 *.xcuserstate
 .DS_Store
-
-.agents/skills/trellis*/
