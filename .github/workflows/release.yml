@@ -121,6 +121,8 @@ jobs:
           retention-days: 7
 
   build-windows:
+    # Windows 发布暂时停用，恢复时移除此条件并恢复 release 的 Windows 资产校验。
+    if: ${{ false }}
     needs: metadata
     runs-on: windows-2025
 
@@ -183,7 +185,7 @@ jobs:
           retention-days: 7
 
   release:
-    needs: [metadata, build-macos, build-windows]
+    needs: [metadata, build-macos]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.metadata.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -202,12 +204,6 @@ jobs:
           name: GhostPin-${{ needs.metadata.outputs.version }}-macos
           path: release-assets/macos
 
-      - name: Download Windows EXE artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: GhostPin-${{ needs.metadata.outputs.version }}-windows-x64
-          path: release-assets/windows
-
       - name: Verify release assets
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
@@ -216,12 +212,10 @@ jobs:
           set -euo pipefail
 
           dmg="release-assets/macos/GhostPin-${VERSION}.dmg"
-          exe="release-assets/windows/GhostPin-${VERSION}-windows-x64.exe"
           test -f "$dmg"
-          test -f "$exe"
 
           actual="$(find release-assets -type f -print | sed 's#.*/##' | sort)"
-          expected="$(printf '%s\n' "GhostPin-${VERSION}.dmg" "GhostPin-${VERSION}-windows-x64.exe" | sort)"
+          expected="GhostPin-${VERSION}.dmg"
           if [[ "$actual" != "$expected" ]]; then
             echo "发布资产不符合预期:" >&2
             printf '%s\n' "$actual" >&2
@@ -258,7 +252,6 @@ jobs:
 
           gh release create "$TAG" \
             "release-assets/macos/GhostPin-${VERSION}.dmg" \
-            "release-assets/windows/GhostPin-${VERSION}-windows-x64.exe" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "GhostPin ${VERSION}" \
