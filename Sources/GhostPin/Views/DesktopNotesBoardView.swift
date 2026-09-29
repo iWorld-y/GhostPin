@@ -5,7 +5,6 @@ import GhostPinCore
 struct DesktopNotesBoardView: View {
     @ObservedObject var appState: AppState
     let onClose: () -> Void
-    @State private var isHovering = false
 
     var body: some View {
         ZStack {
@@ -14,20 +13,20 @@ struct DesktopNotesBoardView: View {
             VStack(alignment: .leading, spacing: 12) {
                 header
 
-                if hudItems.isEmpty {
+                if renderedItems.isEmpty {
                     emptyState
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 10) {
-                            if !doingItems.isEmpty {
+                            if !projection.doing.isEmpty {
                                 taskSectionHeader("Doing")
-                                ForEach(doingItems) { item in
+                                ForEach(projection.doing) { item in
                                     taskCard(item)
                                 }
                             }
-                            if !todoItems.isEmpty {
+                            if !projection.todo.isEmpty {
                                 taskSectionHeader("TODO")
-                                ForEach(todoItems) { item in
+                                ForEach(projection.todo) { item in
                                     taskCard(item)
                                 }
                             }
@@ -50,17 +49,11 @@ struct DesktopNotesBoardView: View {
         .saturation(isActive ? 1 : 0.88)
         .blur(radius: isActive ? 0 : 0.08)
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.18)) {
-                isHovering = hovering
-            }
-        }
-        .onChange(of: appState.preferences.hudMode) { _, mode in
-            if mode == .passthrough {
-                isHovering = false
-            }
+            // 隐身的视觉呈现完全由 WindowCoordinator 的窗口 alphaValue 承担；
+            // 模式切换时的指针事实由 updateHUD() 统一重算，此处不重复同步。
+            appState.windowCoordinator.setPointerInsideHUD(hovering)
         }
         .animation(.easeInOut(duration: 0.18), value: isActive)
-        .animation(.easeInOut(duration: 0.18), value: isGhostFading)
     }
 
     private var header: some View {
@@ -70,7 +63,7 @@ struct DesktopNotesBoardView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("GhostPin")
                     .font(.system(size: 16, weight: .semibold))
-                Text("\(hudItems.count) 个未完成")
+                Text("Doing \(projection.doingCount) · Todo \(projection.todoCount)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -131,19 +124,17 @@ struct DesktopNotesBoardView: View {
         ]
     }
 
-    private var hudItems: [TodoItem] {
-        appState.todoStore.hudItems(
+    private var projection: HudProjection {
+        appState.todoStore.hudProjection(
             scope: appState.preferences.hudScope,
-            maxCount: appState.preferences.hudMaxItems
+            maxCount: appState.preferences.hudMaxItems,
+            focusDoing: appState.preferences.hudFocusDoing
         )
     }
 
-    private var doingItems: [TodoItem] {
-        hudItems.filter { $0.status == .doing }
-    }
-
-    private var todoItems: [TodoItem] {
-        hudItems.filter { $0.status == .todo }
+    /// HUD 实际渲染的卡片：Doing 分区在前，Todo 分区在后。
+    private var renderedItems: [TodoItem] {
+        projection.doing + projection.todo
     }
 
     private func taskCard(_ item: TodoItem) -> some View {
@@ -172,22 +163,12 @@ struct DesktopNotesBoardView: View {
         isInteractive
     }
 
-    private var isGhostFading: Bool {
-        !isInteractive && isHovering
-    }
-
     private var boardOpacity: Double {
-        if isGhostFading {
-            return 0.4
-        }
-        return isActive ? 1 : 0.86
+        isActive ? 1 : 0.86
     }
 
     private var strokeOpacity: Color {
-        if isGhostFading {
-            return .white.opacity(0.10)
-        }
-        return .white.opacity(isActive ? 0.34 : 0.26)
+        .white.opacity(isActive ? 0.34 : 0.26)
     }
 }
 

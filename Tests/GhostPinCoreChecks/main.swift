@@ -37,6 +37,11 @@ let checks: [Check] = [
     ("TodoStore.hudItems excludes completed items", checkHudItemsExcludesCompletedItems),
     ("TodoItem decodes legacy data with default priority", checkDecodesLegacyTodoItemWithoutNewFields),
     ("TodoStore prioritizes Doing over Todo", checkDoingItemsAreSortedBeforeTodoItems),
+    ("TodoStore.hudProjection focuses Doing and hides Todo when enabled", checkHudProjectionFocusesDoing),
+    ("TodoStore.hudProjection shows Todo when there is no Doing", checkHudProjectionWithoutDoingShowsTodo),
+    ("TodoStore.hudProjection shows both sections when focus is disabled", checkHudProjectionDisabledShowsBothSections),
+    ("TodoStore.hudProjection applies maxCount to rendered items only", checkHudProjectionLimitAppliesToRenderedItems),
+    ("TodoStore.hudProjection counts sections independently of the limit", checkHudProjectionCountsAreIndependent),
     ("TodoStore sorts open items by priority then due date", checkSortsOpenItemsByPriorityThenDueDate),
     ("TodoStore sinks overdue items to bottom", checkSortsOverdueItemsToBottom),
     ("TodoStore sorts items without due date after those with", checkSortsItemsWithoutDueDateLast),
@@ -573,6 +578,125 @@ func checkDoingItemsAreSortedBeforeTodoItems() throws {
 
     let hudItems = store.hudItems(scope: .all, maxCount: 1, now: now, calendar: checkCalendar)
     try check(hudItems.map(\.title) == ["Doing-低"], "HUD 条数上限应优先保留 Doing")
+}
+
+func checkHudProjectionFocusesDoing() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+    let doing = try require(try store.add(title: "进行中"), "expected doing task")
+    _ = try store.setStatus(doing.id, status: .doing, at: now)
+    _ = try store.add(title: "待办一")
+    _ = try store.add(title: "待办二")
+
+    let projection = store.hudProjection(scope: .all, maxCount: 10, focusDoing: true, now: now, calendar: checkCalendar)
+    try check(projection.doing.map(\.title) == ["进行中"], "聚焦时应渲染 Doing，实际: \(projection.doing.map(\.title))")
+    try check(projection.todo.isEmpty, "聚焦时不应渲染任何 Todo，实际: \(projection.todo.map(\.title))")
+    try check(projection.doingCount == 1, "Doing 计数应为 1，实际: \(projection.doingCount)")
+    try check(projection.todoCount == 2, "Todo 计数应仍为 2（计数不受隐藏影响），实际: \(projection.todoCount)")
+}
+
+func checkHudProjectionWithoutDoingShowsTodo() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+    _ = try store.add(title: "待办一")
+
+    let projection = store.hudProjection(scope: .all, maxCount: 10, focusDoing: true, now: now, calendar: checkCalendar)
+    try check(projection.doing.isEmpty, "无 Doing 时 Doing 组应为空")
+    try check(projection.todo.map(\.title) == ["待办一"], "无 Doing 时聚焦不应隐藏 Todo，实际: \(projection.todo.map(\.title))")
+    try check(projection.todoCount == 1, "Todo 计数应为 1，实际: \(projection.todoCount)")
+}
+
+func checkHudProjectionDisabledShowsBothSections() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+    let doing = try require(
+        try store.add(title: "进行中", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 9, minute: 0), priority: .low),
+        "expected doing task"
+    )
+    _ = try store.setStatus(doing.id, status: .doing, at: now)
+    _ = try store.add(
+        title: "待办-高",
+        createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 10, minute: 0),
+        priority: .high
+    )
+
+    let projection = store.hudProjection(scope: .all, maxCount: 10, focusDoing: false, now: now, calendar: checkCalendar)
+    try check(
+        projection.doing.map(\.title) == ["进行中"],
+        "关闭聚焦时应渲染 Doing，实际: \(projection.doing.map(\.title))"
+    )
+    try check(
+        projection.todo.map(\.title) == ["待办-高"],
+        "关闭聚焦时应同时渲染 Todo，实际: \(projection.todo.map(\.title))"
+    )
+    try check(projection.doingCount == 1 && projection.todoCount == 1, "关闭聚焦时计数应为 1/1")
+}
+
+func checkHudProjectionLimitAppliesToRenderedItems() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+    let doing = try require(
+        try store.add(title: "进行中", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 9, minute: 0), priority: .low),
+        "expected doing task"
+    )
+    _ = try store.setStatus(doing.id, status: .doing, at: now)
+    for index in 0..<5 {
+        _ = try store.add(
+            title: "待办-高\(index)",
+            createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 10, minute: index),
+            priority: .high
+        )
+    }
+
+    // 上限为 3 时，聚焦模式必须把 3 个名额全部给 Doing 集合，而不是被 Todo 占满。
+    let focused = store.hudProjection(scope: .all, maxCount: 3, focusDoing: true, now: now, calendar: checkCalendar)
+    try check(focused.doing.map(\.title) == ["进行中"], "聚焦时上限应只作用于 Doing，实际: \(focused.doing.map(\.title))")
+    try check(focused.todo.isEmpty, "聚焦时不应渲染 Todo，实际: \(focused.todo.map(\.title))")
+
+    let unfocused = store.hudProjection(scope: .all, maxCount: 3, focusDoing: false, now: now, calendar: checkCalendar)
+    let rendered = unfocused.doing + unfocused.todo
+    try check(rendered.count == 3, "关闭聚焦时渲染总数应为 3，实际: \(rendered.count)")
+    try check(
+        unfocused.doing.map(\.title) == ["进行中"],
+        "关闭聚焦时 Doing 应优先占用上限，实际: \(unfocused.doing.map(\.title))"
+    )
+    try check(
+        unfocused.todo.count == 2,
+        "关闭聚焦时剩余名额应给 Todo，实际: \(unfocused.todo.count)"
+    )
+}
+
+func checkHudProjectionCountsAreIndependent() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+    for index in 0..<2 {
+        let doing = try require(try store.add(title: "进行中\(index)"), "expected doing task")
+        _ = try store.setStatus(doing.id, status: .doing, at: now)
+    }
+    for index in 0..<5 {
+        _ = try store.add(title: "待办\(index)")
+    }
+
+    // 上限设为 1：渲染集合被截断，但分区计数仍反映显示范围内的完整数量。
+    let projection = store.hudProjection(scope: .all, maxCount: 1, focusDoing: true, now: now, calendar: checkCalendar)
+    try check(projection.doingCount == 2, "Doing 计数应为 2，实际: \(projection.doingCount)")
+    try check(projection.todoCount == 5, "Todo 计数应为 5，实际: \(projection.todoCount)")
+    try check(projection.doing.count == 1, "上限为 1 时渲染的 Doing 应为 1，实际: \(projection.doing.count)")
+    try check(projection.todo.isEmpty, "聚焦时不应渲染 Todo")
+    try check(
+        projection.doingCount > projection.doing.count && projection.todoCount > projection.todo.count,
+        "分区计数应独立于截断且隐藏后的渲染集合"
+    )
 }
 
 func checkSortsOpenItemsByPriorityThenDueDate() throws {

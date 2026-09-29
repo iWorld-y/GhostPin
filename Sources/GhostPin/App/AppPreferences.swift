@@ -42,6 +42,11 @@ final class AppPreferences: ObservableObject {
         didSet { defaults.set(hudMaxItems, forKey: Keys.hudMaxItems) }
     }
 
+    /// 有 Doing 任务时只展示 Doing 分区，默认开启。
+    @Published var hudFocusDoing: Bool {
+        didSet { defaults.set(hudFocusDoing, forKey: Keys.hudFocusDoing) }
+    }
+
     @Published var hudAllSpaces: Bool {
         didSet { defaults.set(hudAllSpaces, forKey: Keys.hudAllSpaces) }
     }
@@ -71,6 +76,8 @@ final class AppPreferences: ObservableObject {
         self.hudOpacity = min(max(loadedOpacity, 0.5), 1.0)
         self.hudScope = defaults.string(forKey: Keys.hudScope).flatMap(HudScope.init(rawValue:)) ?? .all
         self.hudMaxItems = defaults.object(forKey: Keys.hudMaxItems) as? Int ?? 8
+        // 键缺失（首次启动或旧版本升级）时按开启处理，只有用户显式关闭才为 false。
+        self.hudFocusDoing = defaults.object(forKey: Keys.hudFocusDoing) == nil ? true : defaults.bool(forKey: Keys.hudFocusDoing)
         self.hudAllSpaces = defaults.object(forKey: Keys.hudAllSpaces) == nil ? true : defaults.bool(forKey: Keys.hudAllSpaces)
         if let data = defaults.data(forKey: Keys.hudFrame),
            let decoded = try? JSONDecoder.ghostPin.decode(HudWindowFrame.self, from: data) {
@@ -120,6 +127,7 @@ final class AppPreferences: ObservableObject {
         static let hudOpacity = "hudOpacity"
         static let hudScope = "hudScope"
         static let hudMaxItems = "hudMaxItems"
+        static let hudFocusDoing = "hudFocusDoing"
         static let hudAllSpaces = "hudAllSpaces"
         static let hudFrame = "hudFrame"
         static let hudModeHotKeyEnabled = "hudModeHotKeyEnabled"

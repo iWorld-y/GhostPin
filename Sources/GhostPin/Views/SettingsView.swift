@@ -37,6 +37,8 @@ struct SettingsView: View {
                     Text("最多显示 \(appState.preferences.hudMaxItems) 条")
                 }
 
+                Toggle("有 Doing 时只显示 Doing", isOn: hudFocusDoingBinding)
+
                 Toggle("跨 Space 显示", isOn: hudAllSpacesBinding)
                 Toggle("HUD 置顶", isOn: keepBoardOnTopBinding)
             }
@@ -173,6 +175,13 @@ struct SettingsView: View {
         Binding(
             get: { appState.preferences.hudMaxItems },
             set: { appState.preferences.hudMaxItems = $0 }
+        )
+    }
+
+    private var hudFocusDoingBinding: Binding<Bool> {
+        Binding(
+            get: { appState.preferences.hudFocusDoing },
+            set: { appState.preferences.hudFocusDoing = $0 }
         )
     }
 

@@ -158,16 +158,54 @@ public final class TodoStore: ObservableObject {
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> [TodoItem] {
+        Array(scopedOpenItems(scope: scope, now: now, calendar: calendar).prefix(max(maxCount, 0)))
+    }
+
+    /// HUD 分区投影：返回实际渲染的 Doing / Todo 卡片与显示范围内的完整计数。
+    ///
+    /// `focusDoing` 开启且范围内存在 Doing 任务时只渲染 Doing，否则先保留 Doing
+    /// 再补 Todo。条数上限只作用于实际渲染的集合，计数则不受上限影响，因此
+    /// 隐藏 Todo 卡片时用户仍能看到被隐藏的数量。
+    public func hudProjection(
+        scope: HudScope,
+        maxCount: Int,
+        focusDoing: Bool,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> HudProjection {
+        let scoped = scopedOpenItems(scope: scope, now: now, calendar: calendar)
+        let doingAll = scoped.filter { $0.status == .doing }
+        let todoAll = scoped.filter { $0.status == .todo }
+        let limit = max(maxCount, 0)
+
+        if focusDoing, !doingAll.isEmpty {
+            return HudProjection(
+                doing: Array(doingAll.prefix(limit)),
+                todo: [],
+                doingCount: doingAll.count,
+                todoCount: todoAll.count
+            )
+        }
+
+        let rendered = Array(scoped.prefix(limit))
+        return HudProjection(
+            doing: rendered.filter { $0.status == .doing },
+            todo: rendered.filter { $0.status == .todo },
+            doingCount: doingAll.count,
+            todoCount: todoAll.count
+        )
+    }
+
+    /// 应用显示范围后的未完成任务，沿用 `openItems` 的既有排序。
+    private func scopedOpenItems(scope: HudScope, now: Date, calendar: Calendar) -> [TodoItem] {
         let open = openItems(now: now)
-        let scoped: [TodoItem]
         switch scope {
         case .all:
-            scoped = open
+            return open
         case .today:
             let dayStart = calendar.ghostPinDayStart(for: now)
-            scoped = open.filter { $0.createdAt >= dayStart }
+            return open.filter { $0.createdAt >= dayStart }
         }
-        return Array(scoped.prefix(max(maxCount, 0)))
     }
 
     public func completedItems(on date: Date, calendar: Calendar = .current) -> [TodoItem] {

@@ -5,6 +5,7 @@ import SwiftUI
 final class WindowCoordinator: NSObject, NSWindowDelegate {
     private weak var appState: AppState?
     private var boardWindow: NSWindow?
+    private var isPointerInsideHUD = false
 
     var isBoardVisible: Bool {
         boardWindow?.isVisible == true
@@ -74,11 +75,44 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         }
         let interactive = appState.preferences.hudMode == .interactive
         boardWindow.ignoresMouseEvents = !interactive
-        boardWindow.alphaValue = CGFloat(appState.preferences.hudOpacity)
+        isPointerInsideHUD = boardWindow.frame.contains(NSEvent.mouseLocation)
+        boardWindow.alphaValue = targetHUDAlpha()
         boardWindow.collectionBehavior = appState.preferences.hudAllSpaces
             ? [.canJoinAllSpaces, .fullScreenAuxiliary]
             : []
         boardWindow.level = appState.preferences.keepBoardOnTop == true ? .floating : .normal
+    }
+
+    /// 记录指针是否位于 HUD 内。是否隐身始终由「模式 + 该事实」推导，不保留跨模式的中间状态。
+    func setPointerInsideHUD(_ inside: Bool) {
+        guard inside != isPointerInsideHUD else {
+            return
+        }
+        isPointerInsideHUD = inside
+        applyHUDAlpha()
+    }
+
+    /// 目标不透明度：穿透模式下指针位于 HUD 内即完全不可见，其余情况用偏好值。
+    private func targetHUDAlpha() -> CGFloat {
+        guard let appState else {
+            return 1
+        }
+        let ghosted = appState.preferences.hudMode == .passthrough && isPointerInsideHUD
+        return ghosted ? 0 : CGFloat(appState.preferences.hudOpacity)
+    }
+
+    private func applyHUDAlpha() {
+        guard let boardWindow else {
+            return
+        }
+        let target = targetHUDAlpha()
+        guard boardWindow.alphaValue != target else {
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            boardWindow.animator().alphaValue = target
+        }
     }
 
     func applyHUDInteraction() {
