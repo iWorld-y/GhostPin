@@ -98,7 +98,13 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             return 1
         }
         let ghosted = appState.preferences.hudMode == .passthrough && isPointerInsideHUD
-        return ghosted ? 0 : CGFloat(appState.preferences.hudOpacity)
+        guard !ghosted else {
+            return 0
+        }
+        let opacity = appState.preferences.hudMode == .passthrough
+            ? appState.preferences.hudPassthroughOpacity
+            : appState.preferences.hudInteractiveOpacity
+        return CGFloat(opacity)
     }
 
     private func applyHUDAlpha() {

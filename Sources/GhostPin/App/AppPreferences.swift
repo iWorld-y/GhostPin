@@ -30,8 +30,12 @@ final class AppPreferences: ObservableObject {
         didSet { saveHudMode() }
     }
 
-    @Published var hudOpacity: Double {
-        didSet { defaults.set(hudOpacity, forKey: Keys.hudOpacity) }
+    @Published var hudPassthroughOpacity: Double {
+        didSet { defaults.set(hudPassthroughOpacity, forKey: Keys.hudPassthroughOpacity) }
+    }
+
+    @Published var hudInteractiveOpacity: Double {
+        didSet { defaults.set(hudInteractiveOpacity, forKey: Keys.hudInteractiveOpacity) }
     }
 
     @Published var hudScope: HudScope {
@@ -72,8 +76,14 @@ final class AppPreferences: ObservableObject {
         self.launchAtLogin = defaults.bool(forKey: Keys.launchAtLogin)
 
         self.hudMode = defaults.string(forKey: Keys.hudMode).flatMap(HudMode.init(rawValue:)) ?? .passthrough
-        let loadedOpacity = defaults.object(forKey: Keys.hudOpacity) as? Double ?? 1.0
-        self.hudOpacity = min(max(loadedOpacity, 0.5), 1.0)
+        let legacyOpacity = defaults.object(forKey: Keys.hudOpacity) as? Double
+        let passthroughOpacity = defaults.object(forKey: Keys.hudPassthroughOpacity) as? Double
+            ?? (legacyOpacity.map { $0 * 0.86 } ?? 1.0)
+        let interactiveOpacity = defaults.object(forKey: Keys.hudInteractiveOpacity) as? Double
+            ?? legacyOpacity
+            ?? 1.0
+        self.hudPassthroughOpacity = min(max(passthroughOpacity, 0.1), 1.0)
+        self.hudInteractiveOpacity = min(max(interactiveOpacity, 0.1), 1.0)
         self.hudScope = defaults.string(forKey: Keys.hudScope).flatMap(HudScope.init(rawValue:)) ?? .all
         self.hudMaxItems = defaults.object(forKey: Keys.hudMaxItems) as? Int ?? 8
         // 键缺失（首次启动或旧版本升级）时按开启处理，只有用户显式关闭才为 false。
@@ -125,6 +135,8 @@ final class AppPreferences: ObservableObject {
         static let launchAtLogin = "launchAtLogin"
         static let hudMode = "hudMode"
         static let hudOpacity = "hudOpacity"
+        static let hudPassthroughOpacity = "hudPassthroughOpacity"
+        static let hudInteractiveOpacity = "hudInteractiveOpacity"
         static let hudScope = "hudScope"
         static let hudMaxItems = "hudMaxItems"
         static let hudFocusDoing = "hudFocusDoing"

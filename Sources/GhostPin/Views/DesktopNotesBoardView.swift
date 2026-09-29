@@ -45,7 +45,6 @@ struct DesktopNotesBoardView: View {
                 .stroke(strokeOpacity, lineWidth: 1)
         )
         .shadow(color: .black.opacity(isActive ? 0.18 : 0.11), radius: isActive ? 22 : 12, y: isActive ? 12 : 6)
-        .opacity(boardOpacity)
         .saturation(isActive ? 1 : 0.88)
         .blur(radius: isActive ? 0 : 0.08)
         .onHover { hovering in
@@ -161,10 +160,6 @@ struct DesktopNotesBoardView: View {
 
     private var isActive: Bool {
         isInteractive
-    }
-
-    private var boardOpacity: Double {
-        isActive ? 1 : 0.86
     }
 
     private var strokeOpacity: Color {

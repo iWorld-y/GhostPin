@@ -24,8 +24,17 @@ struct SettingsView: View {
         Form {
             Section("HUD") {
                 HStack {
-                    Text("透明度")
-                    Slider(value: hudOpacityBinding, in: 0.5...1.0)
+                    opacityControl(
+                        title: "穿透模式透明度",
+                        value: passthroughOpacityBinding
+                    )
+                }
+
+                HStack {
+                    opacityControl(
+                        title: "交互模式透明度",
+                        value: interactiveOpacityBinding
+                    )
                 }
 
                 Picker("显示范围", selection: hudScopeBinding) {
@@ -154,11 +163,40 @@ struct SettingsView: View {
         )
     }
 
-    private var hudOpacityBinding: Binding<Double> {
+    private func opacityControl(title: String, value: Binding<Double>) -> some View {
+        HStack {
+            Text(title)
+            Slider(value: value, in: 0.1...1.0)
+            TextField("", value: percentBinding(for: value), format: .number)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 48)
+            Text("%")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func percentBinding(for value: Binding<Double>) -> Binding<Int> {
         Binding(
-            get: { appState.preferences.hudOpacity },
+            get: { Int((value.wrappedValue * 100).rounded()) },
+            set: { value.wrappedValue = min(max(Double($0) / 100, 0.1), 1.0) }
+        )
+    }
+
+    private var passthroughOpacityBinding: Binding<Double> {
+        Binding(
+            get: { appState.preferences.hudPassthroughOpacity },
             set: {
-                appState.preferences.hudOpacity = $0
+                appState.preferences.hudPassthroughOpacity = $0
+                appState.updateHUD()
+            }
+        )
+    }
+
+    private var interactiveOpacityBinding: Binding<Double> {
+        Binding(
+            get: { appState.preferences.hudInteractiveOpacity },
+            set: {
+                appState.preferences.hudInteractiveOpacity = $0
                 appState.updateHUD()
             }
         )
