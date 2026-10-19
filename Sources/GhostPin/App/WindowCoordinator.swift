@@ -6,6 +6,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     private weak var appState: AppState?
     private var boardWindow: NSWindow?
     private var isPointerInsideHUD = false
+    private var needsInitialHUDHeight = false
 
     var isBoardVisible: Bool {
         boardWindow?.isVisible == true
@@ -21,8 +22,9 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         }
 
         if boardWindow == nil {
+            let savedFrame = appState.preferences.hudFrame
             let window = HUDPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 360, height: 460),
+                contentRect: NSRect(x: 0, y: 0, width: DesktopNotesBoardView.defaultWidth, height: 460),
                 styleMask: [.borderless, .resizable],
                 backing: .buffered,
                 defer: false
@@ -33,8 +35,8 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             window.backgroundColor = .clear
             window.isMovableByWindowBackground = true
             window.hidesOnDeactivate = false
-            window.minSize = NSSize(width: 300, height: 280)
-            if let savedFrame = appState.preferences.hudFrame {
+            window.minSize = DesktopNotesBoardView.minimumSize
+            if let savedFrame {
                 window.setFrame(savedFrame.nsRect, display: false)
                 if !Self.frameIntersectsAnyScreen(savedFrame.nsRect) {
                     window.center()
@@ -43,6 +45,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
                 window.center()
             }
             boardWindow = window
+            needsInitialHUDHeight = savedFrame == nil
         }
 
         boardWindow?.contentView = NSHostingView(
@@ -50,11 +53,27 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
                 appState: appState,
                 onClose: { [weak self] in
                     self?.hideBoard()
+                },
+                onPreferredHeightChange: { [weak self] height in
+                    self?.applyInitialHUDHeight(height)
                 }
             )
         )
         updateHUD()
         boardWindow?.orderFrontRegardless()
+    }
+
+    /// 首次展示且未保存尺寸时采用内容高度，之后由用户调整并持久化窗口尺寸。
+    private func applyInitialHUDHeight(_ height: CGFloat) {
+        guard needsInitialHUDHeight, let boardWindow else {
+            return
+        }
+        needsInitialHUDHeight = false
+        let height = max(height, DesktopNotesBoardView.minimumSize.height)
+        var frame = boardWindow.frame
+        frame.origin.y += frame.height - height
+        frame.size.height = height
+        boardWindow.setFrame(frame, display: true)
     }
 
     func hideBoard() {

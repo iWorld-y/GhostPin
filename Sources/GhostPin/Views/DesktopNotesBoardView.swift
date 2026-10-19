@@ -5,122 +5,228 @@ import GhostPinCore
 struct DesktopNotesBoardView: View {
     @ObservedObject var appState: AppState
     let onClose: () -> Void
+    let onPreferredHeightChange: (CGFloat) -> Void
+
+    static let defaultWidth: CGFloat = 380
+    static let minimumSize = NSSize(width: 320, height: 144)
+    private static let headerHeight: CGFloat = 39
+    private static let footerHeight: CGFloat = 25
+    private static let maximumBodyHeight: CGFloat = 396
+    private static let emptyBodyHeight: CGFloat = 80
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var contentHeight: CGFloat = maximumBodyHeight
 
     var body: some View {
-        ZStack {
-            boardBackground
+        let projection = projection
+        let isEmpty = projection.doing.isEmpty && projection.todo.isEmpty
 
-            VStack(alignment: .leading, spacing: 12) {
-                header
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                header(projection)
+                    .frame(height: Self.headerHeight)
 
-                if renderedItems.isEmpty {
+                if isEmpty {
                     emptyState
                 } else {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 10) {
-                            if !projection.doing.isEmpty {
-                                taskSectionHeader("Doing")
-                                ForEach(projection.doing) { item in
-                                    taskCard(item)
-                                }
-                            }
-                            if !projection.todo.isEmpty {
-                                taskSectionHeader("TODO")
-                                ForEach(projection.todo) { item in
-                                    taskCard(item)
-                                }
-                            }
-                        }
-                        .padding(.bottom, 4)
-                    }
-                    .scrollIndicators(.never)
+                    taskList(projection, availableHeight: geometry.size.height - Self.headerHeight - Self.footerHeight)
                 }
+
+                Spacer(minLength: 0)
+
+                footer(projection)
+                    .frame(height: Self.footerHeight)
             }
-            .padding(16)
         }
-        .frame(minWidth: 310, minHeight: 300)
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(strokeOpacity, lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(isActive ? 0.18 : 0.11), radius: isActive ? 22 : 12, y: isActive ? 12 : 6)
-        .saturation(isActive ? 1 : 0.88)
-        .blur(radius: isActive ? 0 : 0.08)
+        .frame(minWidth: Self.minimumSize.width, minHeight: Self.minimumSize.height)
+        .background {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .overlay(Color(nsColor: .windowBackgroundColor).opacity(0.65))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(.primary.opacity(isInteractive ? 0.14 : 0.1), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .shadow(color: .black.opacity(isInteractive ? 0.18 : 0.11), radius: 20, y: 8)
+        .saturation(isInteractive ? 1 : 0.88)
         .onHover { hovering in
-            // 隐身的视觉呈现完全由 WindowCoordinator 的窗口 alphaValue 承担；
-            // 模式切换时的指针事实由 updateHUD() 统一重算，此处不重复同步。
+            // 指针隐身仍由窗口层处理，视图只提供指针位置事实。
             appState.windowCoordinator.setPointerInsideHUD(hovering)
         }
-        .animation(.easeInOut(duration: 0.18), value: isActive)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: isInteractive)
+        .onAppear {
+            if isEmpty {
+                reportPreferredHeight(Self.emptyBodyHeight)
+            }
+        }
+        .onChange(of: isEmpty) { _, empty in
+            if empty {
+                reportPreferredHeight(Self.emptyBodyHeight)
+            }
+        }
     }
 
-    private var header: some View {
-        HStack(alignment: .center, spacing: 10) {
-            GhostPinLogoMark(size: 34, isMuted: !isActive)
+    private func header(_ projection: HudProjection) -> some View {
+        HStack(spacing: 8) {
+            GhostPinLogoMark(size: 21, isMuted: !isInteractive)
+            Text("GhostPin")
+                .font(.system(size: 12.5, weight: .semibold))
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("GhostPin")
-                    .font(.system(size: 16, weight: .semibold))
-                Text("Doing \(projection.doingCount) · Todo \(projection.todoCount)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            Spacer(minLength: 4)
 
-            Spacer()
+            Text("Doing \(projection.doingCount) · Todo \(projection.todoCount)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
-                    .frame(width: 28, height: 28)
+                    .font(.system(size: 10, weight: .medium))
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .foregroundStyle(.secondary)
             .help("隐藏桌面便签")
-            .opacity(isActive ? 1 : 0)
+            .accessibilityLabel("隐藏桌面便签")
+            .disabled(!isInteractive)
+            .opacity(isInteractive ? 1 : 0)
+            .accessibilityHidden(!isInteractive)
+        }
+        .padding(.horizontal, 12)
+    }
+
+    private func taskList(_ projection: HudProjection, availableHeight: CGFloat) -> some View {
+        let viewportHeight = min(contentHeight, Self.maximumBodyHeight, max(0, availableHeight))
+
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                if !projection.doing.isEmpty {
+                    taskSection("Doing", items: projection.doing, count: projection.doingCount, isDoing: true)
+                }
+                if !projection.todo.isEmpty {
+                    taskSection("Todo", items: projection.todo, count: projection.todoCount, isDoing: false)
+                }
+            }
+            .padding(.bottom, 6)
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(key: HUDContentHeightKey.self, value: geometry.size.height)
+                }
+            }
+        }
+        .scrollIndicators(.never)
+        .frame(height: viewportHeight)
+        .overlay(alignment: .bottom) {
+            if contentHeight > viewportHeight + 1 {
+                LinearGradient(
+                    colors: [Color(nsColor: .windowBackgroundColor).opacity(0), Color(nsColor: .windowBackgroundColor).opacity(0.9)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 28)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+        }
+        .onPreferenceChange(HUDContentHeightKey.self) { height in
+            guard height > 0 else { return }
+            contentHeight = height
+            reportPreferredHeight(min(height, Self.maximumBodyHeight))
+        }
+    }
+
+    private func taskSection(_ title: String, items: [TodoItem], count: Int, isDoing: Bool) -> some View {
+        Section {
+            ForEach(items) { item in
+                DesktopNoteRowView(item: item, isInteractive: isInteractive) {
+                    appState.advanceStatus(item)
+                }
+                // 状态变化时重建行，避免跨分区移动后复用旧图标和动作说明。
+                .id("\(item.id):\(item.status.rawValue)")
+                .overlay(alignment: .top) {
+                    if item.id != items.first?.id {
+                        Rectangle()
+                            .fill(.primary.opacity(0.08))
+                            .frame(height: 0.5)
+                            .allowsHitTesting(false)
+                    }
+                }
+            }
+        } header: {
+            HStack(spacing: 5) {
+                if isDoing {
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 4, height: 4)
+                        .accessibilityHidden(true)
+                }
+                Text(title.uppercased())
+                    .tracking(1)
+                Spacer()
+                Text("\(count)")
+                    .monospacedDigit()
+            }
+            .font(.system(size: 9.5, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
+            .padding(.bottom, 4)
+            .frame(maxWidth: .infinity)
+            .background(.regularMaterial)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func footer(_ projection: HudProjection) -> some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(isInteractive ? Color.primary : Color.secondary)
+                    .frame(width: 4, height: 4)
+                    .accessibilityHidden(true)
+                Text(isInteractive ? "交互模式" : "穿透模式")
+            }
+
+            Spacer(minLength: 4)
+
+            Text("\(projection.doing.count + projection.todo.count) / \(projection.doingCount + projection.todoCount)")
+            Text(appState.preferences.hudScope == .all ? "全部" : "今天新增")
+
+            if appState.preferences.hudModeHotKeyEnabled,
+               case .registered = appState.hotKeySetupState,
+               let shortcut = appState.preferences.hudModeHotKeyShortcut {
+                Text(shortcut.displayName)
+            }
+        }
+        .font(.system(size: 9.5, design: .monospaced))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .padding(.horizontal, 12)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(.primary.opacity(0.08))
+                .frame(height: 0.5)
         }
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "checkmark.circle")
-                .font(.system(size: 28, weight: .light))
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
             Text("没有未完成待办")
-                .font(.callout)
+                .font(.system(size: 12.5, weight: .medium))
+            Text("ghostpin-cli add \"写周报\" --group 默认")
+                .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var boardBackground: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(.ultraThinMaterial)
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: isActive ? activeGradientColors : inactiveGradientColors,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        }
-    }
-
-    private var activeGradientColors: [Color] {
-        [
-            Color.white.opacity(0.38),
-            Color(red: 0.56, green: 0.73, blue: 0.47).opacity(0.20),
-            Color(red: 0.95, green: 0.70, blue: 0.23).opacity(0.16)
-        ]
-    }
-
-    private var inactiveGradientColors: [Color] {
-        [
-            Color.white.opacity(0.14),
-            Color(red: 0.34, green: 0.55, blue: 0.38).opacity(0.24),
-            Color.black.opacity(0.03)
-        ]
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: Self.emptyBodyHeight)
     }
 
     private var projection: HudProjection {
@@ -131,137 +237,110 @@ struct DesktopNotesBoardView: View {
         )
     }
 
-    /// HUD 实际渲染的卡片：Doing 分区在前，Todo 分区在后。
-    private var renderedItems: [TodoItem] {
-        projection.doing + projection.todo
-    }
-
-    private func taskCard(_ item: TodoItem) -> some View {
-        DesktopNoteCardView(
-            item: item,
-            isActive: isActive,
-            onAdvanceStatus: {
-                appState.advanceStatus(item)
-            }
-        )
-    }
-
-    private func taskSectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .textCase(.uppercase)
-            .padding(.top, 2)
-    }
-
     private var isInteractive: Bool {
         appState.preferences.hudMode == .interactive
     }
 
-    private var isActive: Bool {
-        isInteractive
-    }
-
-    private var strokeOpacity: Color {
-        .white.opacity(isActive ? 0.34 : 0.26)
+    private func reportPreferredHeight(_ bodyHeight: CGFloat) {
+        onPreferredHeightChange(Self.headerHeight + bodyHeight + Self.footerHeight)
     }
 }
 
-private struct DesktopNoteCardView: View {
+private struct HUDContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct DesktopNoteRowView: View {
     let item: TodoItem
-    let isActive: Bool
+    let isInteractive: Bool
     let onAdvanceStatus: () -> Void
 
+    @State private var isHovering = false
+    @FocusState private var isStatusFocused: Bool
+
     var body: some View {
-        HStack(alignment: .top, spacing: 11) {
+        HStack(alignment: .top, spacing: 9) {
             Button(action: onAdvanceStatus) {
-                Image(systemName: "circle")
-                    .font(.system(size: 15, weight: .medium))
-                    .frame(width: 22, height: 22)
+                Image(systemName: item.status == .doing ? "circle.fill" : "circle")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: 27, height: 27)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(item.status == .doing ? .orange : (isActive ? .primary : .secondary))
+            .foregroundStyle(.primary.opacity(item.status == .doing ? 0.64 : 0.35))
+            .focusable()
+            .focusEffectDisabled()
+            .focused($isStatusFocused)
+            .onKeyPress(keys: [.space, .return], phases: .down) { _ in
+                guard isInteractive else { return .ignored }
+                onAdvanceStatus()
+                return .handled
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(Color.accentColor.opacity(isStatusFocused ? 1 : 0), lineWidth: 2)
+                    .allowsHitTesting(false)
+            }
             .help(item.status == .doing ? "标记完成" : "开始处理")
+            .accessibilityLabel("\(item.status == .doing ? "标记完成" : "开始处理")：\(item.title)")
+            .disabled(!isInteractive)
+            // 27 pt 命中区借用行内边距，布局仍按 15 pt 状态列对齐。
+            .padding(-6)
+            .padding(.top, 2)
 
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(item.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .strikethrough(item.isOverdue(), color: .red)
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Spacer(minLength: 0)
-
-                    HStack(spacing: 4) {
-                        priorityBadge
-                        groupBadge
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
-                }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .strikethrough(item.isOverdue(), color: .red)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 if let description = item.description, !description.isEmpty {
                     Text(description)
-                        .font(.caption2)
+                        .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(priorityLabel)
+                        .font(.system(size: 10, weight: item.priority == .low ? .regular : .semibold))
+                        .foregroundStyle(priorityColor)
+
+                    Text(item.group)
+                        .font(.system(size: 10, weight: .semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: Self.groupTextWidth)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
+                        .foregroundStyle(.secondary)
                 }
 
                 if let dueAt = item.dueAt {
                     Text(Self.dueFormatter.string(from: dueAt))
-                        .font(.caption2)
+                        .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(item.isOverdue() ? .red : .secondary)
                         .lineLimit(1)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: 84, alignment: .trailing)
         }
-        .padding(12)
-        .background(cardBackground)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(.white.opacity(isActive ? 0.32 : 0.22), lineWidth: 1)
-        )
-    }
-
-    private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(.thinMaterial)
-            .overlay(
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(isActive ? 0.22 : 0.18),
-                        Color(red: 0.95, green: 0.75, blue: 0.25).opacity(isActive ? 0.16 : 0.11)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            )
-    }
-
-    private var priorityBadge: some View {
-        Text(priorityLabel)
-            .font(.system(size: 10, weight: .semibold))
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(priorityColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-            .foregroundStyle(priorityColor)
-    }
-
-    private var groupBadge: some View {
-        Text(item.group)
-            .font(.system(size: 10, weight: .semibold))
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .frame(maxWidth: Self.groupTextWidth)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-            .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .padding(.bottom, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.primary.opacity(isHovering && isInteractive ? 0.06 : 0))
+        .onHover { isHovering = $0 }
     }
 
     private static let groupTextWidth = ("汉汉汉" as NSString).size(
@@ -284,7 +363,7 @@ private struct DesktopNoteCardView: View {
         case .high:
             return .red
         case .medium:
-            return .orange
+            return .primary.opacity(0.74)
         case .low:
             return .secondary
         }
