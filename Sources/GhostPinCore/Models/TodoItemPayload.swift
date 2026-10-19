@@ -9,6 +9,7 @@ public struct TodoItemPayload: Encodable {
 
     private enum CodingKeys: String, CodingKey {
         case id
+        case group
         case title
         case createdAt
         case status
@@ -24,6 +25,7 @@ public struct TodoItemPayload: Encodable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(item.id, forKey: .id)
+        try container.encode(item.group, forKey: .group)
         try container.encode(item.title, forKey: .title)
         try container.encode(item.createdAt, forKey: .createdAt)
         try container.encode(item.status, forKey: .status)

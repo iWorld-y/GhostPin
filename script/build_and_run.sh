@@ -18,7 +18,9 @@ INFO_PLIST="$APP_CONTENTS/Info.plist"
 
 cd "$ROOT_DIR"
 
-pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+if [[ "$MODE" != "--verify" && "$MODE" != "verify" ]]; then
+  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+fi
 
 swift build
 BUILD_DIR="$(swift build --show-bin-path)"
@@ -66,10 +68,6 @@ open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
 }
 
-is_app_running() {
-  pgrep -x "$APP_NAME" >/dev/null || pgrep -f "$APP_BINARY" >/dev/null
-}
-
 case "$MODE" in
   run)
     open_app
@@ -86,22 +84,28 @@ case "$MODE" in
     /usr/bin/log stream --info --style compact --predicate "subsystem == \"$BUNDLE_ID\""
     ;;
   --verify|verify)
-    open_app
+    VERIFY_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ghostpin-verify.XXXXXX")"
+    VERIFY_PID=""
+    cleanup_verification() {
+      if [[ -n "$VERIFY_PID" ]]; then
+        kill "$VERIFY_PID" >/dev/null 2>&1 || true
+        wait "$VERIFY_PID" 2>/dev/null || true
+      fi
+      rm -rf "$VERIFY_ROOT"
+    }
+    trap cleanup_verification EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    GHOSTPIN_TEST_SUPPORT_ROOT="$VERIFY_ROOT" "$APP_BINARY" >"$VERIFY_ROOT/app.log" 2>&1 &
+    VERIFY_PID=$!
     for _ in {1..6}; do
-      if is_app_running; then
-        exit 0
-      fi
       sleep 0.5
-    done
-    "$APP_BINARY" >/dev/null 2>&1 &
-    disown
-    for _ in {1..10}; do
-      if is_app_running; then
-        exit 0
+      if ! kill -0 "$VERIFY_PID" 2>/dev/null; then
+        cat "$VERIFY_ROOT/app.log"
+        exit 1
       fi
-      sleep 0.5
     done
-    exit 1
+    echo "已验证 GhostPin 进程启动，使用隔离任务目录。"
     ;;
   *)
     echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2

@@ -1,6 +1,7 @@
 use std::{
     fmt, fs, io,
     path::{Path, PathBuf},
+    time::SystemTime,
 };
 
 use windows::{
@@ -14,7 +15,7 @@ use windows::{
 
 use crate::{
     codec::{self, CodecError, RuntimeApartment},
-    core::{HudSettings, Todo},
+    core::{AdvanceService, HudSettings, TaskDocument, Todo},
 };
 
 /// Determines whether a debounced file reload should trigger a redraw.
@@ -139,46 +140,112 @@ fn atomic_write(path: &Path, contents: &str) -> Result<(), StorageError> {
 #[derive(Debug)]
 pub struct TaskRepository {
     path: PathBuf,
-    snapshot: Vec<Todo>,
+    document: TaskDocument,
 }
 impl TaskRepository {
     pub fn new(path: PathBuf) -> Self {
         Self {
             path,
-            snapshot: Vec::new(),
+            document: TaskDocument::default(),
         }
     }
     pub fn path(&self) -> &Path {
         &self.path
     }
     pub fn snapshot(&self) -> &[Todo] {
-        &self.snapshot
+        &self.document.items
     }
-    fn load_existing(&mut self) -> Result<&[Todo], StorageError> {
+    pub fn document(&self) -> &TaskDocument {
+        &self.document
+    }
+    fn read_latest(&self) -> Result<(TaskDocument, Option<Vec<u8>>), StorageError> {
         let text = read_utf8(&self.path)?;
-        let parsed = codec::decode_todos(&text).map_err(StorageError::from)?;
-        self.snapshot = parsed;
-        Ok(&self.snapshot)
+        let (document, legacy) = codec::decode_document(&text).map_err(StorageError::from)?;
+        Ok((document, legacy.then(|| text.into_bytes())))
     }
     pub fn load(&mut self) -> Result<&[Todo], StorageError> {
+        let _lock = lock_tasks(&self.path)?;
         if !self.path.exists() {
-            return Ok(&self.snapshot);
+            return Ok(self.snapshot());
         }
-        self.load_existing()
+        let (document, legacy) = self.read_latest()?;
+        if let Some(data) = legacy {
+            self.commit(&document, Some(&data))?;
+        }
+        self.document = document;
+        Ok(self.snapshot())
     }
-    /// Reloads the file for a mutating operation and rejects a missing file.
-    ///
-    /// A normal watcher refresh may keep the last valid snapshot when the
-    /// file is temporarily absent. A user-triggered state transition must not
-    /// use that snapshot to recreate a file that another process deleted.
-    pub fn load_for_update(&mut self) -> Result<&[Todo], StorageError> {
-        self.load_existing()
+    /// 在固定文件锁内读取、推进和提交，过期快照不得写回。
+    pub fn advance_status<F: Fn() -> u64>(
+        &mut self,
+        id: u64,
+        service: &mut AdvanceService<F>,
+        at: SystemTime,
+    ) -> Result<bool, StorageError> {
+        let _lock = lock_tasks(&self.path)?;
+        let (mut document, legacy) = self.read_latest()?;
+        if !document.items.iter().any(|item| item.id == id) {
+            return Err(StorageError::io(
+                "advance",
+                &self.path,
+                format!("未找到任务：{id}"),
+            ));
+        }
+        if service.advance_by_id(&mut document.items, id, at).is_none() {
+            return Ok(false);
+        }
+        if let Err(error) = self.commit(&document, legacy.as_deref()) {
+            service.rollback(id);
+            return Err(error);
+        }
+        self.document = document;
+        Ok(true)
     }
-    pub fn replace(&mut self, items: &[Todo]) -> Result<(), StorageError> {
-        let text = codec::encode_todos(items).map_err(StorageError::from)?;
+    fn commit(&self, document: &TaskDocument, legacy: Option<&[u8]>) -> Result<(), StorageError> {
+        let text = codec::encode_document(document).map_err(StorageError::from)?;
+        if let Some(data) = legacy {
+            preserve_backup(&self.path.with_file_name("todos.v1.backup.json"), data)?;
+        }
         atomic_write(&self.path, &text)?;
-        self.snapshot = items.to_vec();
         Ok(())
+    }
+}
+
+fn lock_tasks(path: &Path) -> Result<fs::File, StorageError> {
+    let lock = path.with_file_name(".todos.lock");
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock)
+        .map_err(|error| StorageError::io("open lock", &lock, error))?;
+    file.lock()
+        .map_err(|error| StorageError::io("lock", &lock, error))?;
+    // 文件句柄存活到事务结束；关闭时释放进程间排他锁。
+    Ok(file)
+}
+
+fn preserve_backup(path: &Path, data: &[u8]) -> Result<(), StorageError> {
+    match fs::File::create_new(path) {
+        Ok(mut file) => {
+            let result = io::Write::write_all(&mut file, data).and_then(|_| file.sync_all());
+            if let Err(error) = result {
+                drop(file);
+                let _ = fs::remove_file(path);
+                return Err(StorageError::io("backup", path, error));
+            }
+            Ok(())
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            if fs::read(path).map_err(|error| StorageError::io("read backup", path, error))? == data
+            {
+                Ok(())
+            } else {
+                Err(StorageError::io("backup", path, "备份内容与旧数据不一致"))
+            }
+        }
+        Err(error) => Err(StorageError::io("backup", path, error)),
     }
 }
 

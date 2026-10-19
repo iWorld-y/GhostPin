@@ -27,7 +27,7 @@ User ──natural language──▶ Agent ──ghostpin-cli──▶ todos.jso
 ## Features
 
 - Desktop ghost HUD: borderless, always-on-top, adjustable opacity, click-through by default, with persisted position, size, opacity, mode, and scope.
-- Read-only HUD display: title, priority, due date, description, and overdue styling; the only interaction is completing a task.
+- A unified HUD list across groups: title, priority, group, due date, description, and overdue styling. Priority and group badges align to the right of the title row. Group text is limited to the width of three Chinese characters, with a trailing ellipsis; the only write interaction advances task status.
 - Menu bar tray: open-task badge, show/hide HUD, interactive mode, settings, and quit; settings include a HUD tab and an Advanced tab (optional global shortcut).
 - Local macOS notifications for reminders, with launch-at-login support.
 - ghostpin-cli for listing, creating, status changes, updates, deletion, JSON output, and command-level help.
@@ -41,7 +41,9 @@ GhostPin is local-first.
 - Preferences use macOS UserDefaults.
 - The app does not access the network at runtime.
 
-When upgrading from an older version, the first access copies `~/Library/Application Support/TodoPin/todos.json` into the GhostPin directory and keeps the old file as a rollback snapshot. Later writes use only the GhostPin file. Quit the old app before upgrading; if you need to roll back, back up both task files and choose which one to restore manually.
+Tasks use a document containing `schemaVersion: 2`, `nextID`, and `items`. Integer IDs start at `10000`, share one sequence across groups, and are never reused after deletion. The first successful access migrates all legacy UUID tasks to the built-in `默认` group, preserving the original bytes in `todos.v1.backup.json` beside the task file. If the GhostPin file is absent, migration can read the old `TodoPin/todos.json` without changing that source.
+
+Quit old app and CLI processes before upgrading, and update the app and bundled CLI together. Old programs cannot read the new document; UUIDs are no longer accepted as task IDs. A rollback restores only the migration-time snapshot, so preserve later changes separately. See [task storage and migration](docs/task-storage.md).
 
 ## Installation
 
@@ -74,8 +76,11 @@ Common commands:
 # List all tasks
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli list --all --json
 
-# Create a task
-/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli add "Prepare report" --priority medium --due "2026-08-20T18:00:00+08:00" --description "Summarize weekly data" --json
+# Query a group; --all can be combined with --group
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli list --group GhostPin --json
+
+# Create a task with an explicit group
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli add "Prepare report" --group 默认 --priority medium --due "2026-08-20T18:00:00+08:00" --description "Summarize weekly data" --json
 
 # Change status
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli doing <id> --json
@@ -83,6 +88,7 @@ Common commands:
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli undone <id> --json
 
 # Update task fields
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --group GhostPin --json
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --title "Prepare and send report" --priority high --due "2026-08-21T18:00:00+08:00" --description "Send to the team" --json
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --clear-due --json
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --clear-reminder --json
@@ -91,7 +97,7 @@ Common commands:
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli delete <id> --json
 ```
 
-Reminders and due dates must be timezone-aware ISO8601 values. A non-zero exit code means the command failed.
+Use a decimal integer `<id>` from an actual query result. Each task has one group. Group names are trimmed and matched exactly, including case. Every creation requires `--group`, including when choosing `默认`. Full group names are retained in data and CLI output. Reminders and due dates must be timezone-aware ISO8601 values. A non-zero exit code means the command failed.
 
 ## Build from source
 
@@ -104,7 +110,7 @@ macOS requirements:
 Windows requirements:
 
 - Windows 11 x64
-- Rust MSVC toolchain
+- Rust 1.89 or later with the MSVC toolchain
 - Visual Studio Build Tools (MSVC and Windows SDK; required only to build from source)
 
 For day-to-day development, use the Makefile:
@@ -116,6 +122,7 @@ make restart                # Build and restart the app
 make stop                   # Stop the app
 make logs                   # Start the app and stream logs
 make test                   # Run core behavior checks
+python3 script/check_cli.py  # Run isolated CLI checks after building
 make cli ARGS='list --json' # Run the development CLI
 make package                # Build a DMG or Windows single-file EXE for this platform
 ```

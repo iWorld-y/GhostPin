@@ -87,7 +87,7 @@ pub enum PlatformEvent {
     ToggleMode,
     OpenSettings,
     Exit,
-    Advance(String),
+    Advance(u64),
     GeometryChanged,
     Resized { width: i32, height: i32 },
     DpiChanged { dpi: u32 },
@@ -128,7 +128,7 @@ impl HudStyle {
 
 #[derive(Clone, Debug)]
 struct HitRegion {
-    id: String,
+    id: u64,
     rect: RECT,
 }
 
@@ -394,7 +394,7 @@ unsafe extern "system" fn window_proc(
                     && y >= region.rect.top
                     && y < region.rect.bottom
             }) {
-                send_event(state, PlatformEvent::Advance(region.id.clone()));
+                send_event(state, PlatformEvent::Advance(region.id));
             }
             return LRESULT(0);
         }
@@ -647,7 +647,7 @@ impl HudWindow {
         }
         Ok(())
     }
-    pub fn set_hit_regions(&self, regions: Vec<(String, RECT)>) {
+    pub fn set_hit_regions(&self, regions: Vec<(u64, RECT)>) {
         if let Some(state) = unsafe { state_ptr(self.hwnd) }.map(|ptr| unsafe { &*ptr }) {
             *state.hit_regions.borrow_mut() = regions
                 .into_iter()

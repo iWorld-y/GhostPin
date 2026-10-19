@@ -28,7 +28,8 @@ pub enum HudMode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Todo {
-    pub id: String,
+    pub id: u64,
+    pub group: String,
     pub title: String,
     pub created_at: SystemTime,
     pub status: Status,
@@ -38,6 +39,47 @@ pub struct Todo {
     pub priority: Priority,
     pub due_at: Option<SystemTime>,
     pub description: Option<String>,
+}
+
+pub const FIRST_TASK_ID: u64 = 10000;
+pub const MAX_TASK_ID: u64 = 9_007_199_254_740_990;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TaskDocument {
+    pub schema_version: u32,
+    pub next_id: u64,
+    pub items: Vec<Todo>,
+}
+
+impl Default for TaskDocument {
+    fn default() -> Self {
+        Self {
+            schema_version: 2,
+            next_id: FIRST_TASK_ID,
+            items: Vec::new(),
+        }
+    }
+}
+
+impl TaskDocument {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != 2 || !(FIRST_TASK_ID..=MAX_TASK_ID + 1).contains(&self.next_id) {
+            return Err("不支持的存储版本或无效下一编号".into());
+        }
+        let mut ids = std::collections::HashSet::new();
+        for item in &self.items {
+            if !(FIRST_TASK_ID..=MAX_TASK_ID).contains(&item.id)
+                || item.id >= self.next_id
+                || !ids.insert(item.id)
+            {
+                return Err("任务 ID 重复、越界或不小于下一编号".into());
+            }
+            if item.group.is_empty() || item.group.trim() != item.group {
+                return Err("组名不能为空或含首尾空白".into());
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -117,7 +159,7 @@ where
     F: Fn() -> u64,
 {
     clock: F,
-    last_successful: Vec<(String, u64)>,
+    last_successful: Vec<(u64, u64)>,
 }
 
 impl Default for AdvanceService<fn() -> u64> {
@@ -136,20 +178,20 @@ where
             last_successful: Vec::new(),
         }
     }
-    pub fn is_cooling_down(&self, id: &str) -> bool {
+    pub fn is_cooling_down(&self, id: u64) -> bool {
         self.last_successful
             .iter()
-            .find(|(key, _)| key == id)
+            .find(|(key, _)| *key == id)
             .is_some_and(|(_, at)| (self.clock)().saturating_sub(*at) < 500)
     }
-    pub fn rollback(&mut self, id: &str) {
-        self.last_successful.retain(|(key, _)| key != id);
+    pub fn rollback(&mut self, id: u64) {
+        self.last_successful.retain(|(key, _)| *key != id);
     }
     pub fn advance(&mut self, item: &mut Todo, completed_at: SystemTime) -> bool {
         let Some(next) = next_status(item.status) else {
             return false;
         };
-        if self.is_cooling_down(&item.id) {
+        if self.is_cooling_down(item.id) {
             return false;
         }
         item.status = next;
@@ -162,14 +204,14 @@ where
         {
             *at = now;
         } else {
-            self.last_successful.push((item.id.clone(), now));
+            self.last_successful.push((item.id, now));
         }
         true
     }
     pub fn advance_by_id(
         &mut self,
         items: &mut [Todo],
-        id: &str,
+        id: u64,
         completed_at: SystemTime,
     ) -> Option<AdvanceResult> {
         let (index, item) = items
@@ -411,10 +453,11 @@ pub fn save_placement(rect: PixelRect, monitor: &MonitorWorkArea) -> Placement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn item(id: &str, status: Status, priority: Priority) -> Todo {
+    fn item(id: u64, status: Status, priority: Priority) -> Todo {
         Todo {
-            id: id.into(),
-            title: id.into(),
+            id,
+            group: "默认".into(),
+            title: id.to_string(),
             created_at: SystemTime::UNIX_EPOCH,
             status,
             completed_at: None,
@@ -429,9 +472,9 @@ mod tests {
     #[test]
     fn projection_orders_doing_before_todo_and_hides_done() {
         let source = vec![
-            item("todo", Status::Todo, Priority::High),
-            item("done", Status::Done, Priority::High),
-            item("doing", Status::Doing, Priority::Low),
+            item(10000, Status::Todo, Priority::High),
+            item(10001, Status::Done, Priority::High),
+            item(10002, Status::Doing, Priority::Low),
         ];
         let result = project(
             &source,
@@ -443,12 +486,8 @@ mod tests {
             },
         );
         assert_eq!(
-            result
-                .items
-                .iter()
-                .map(|item| item.id.as_str())
-                .collect::<Vec<_>>(),
-            ["doing", "todo"]
+            result.items.iter().map(|item| item.id).collect::<Vec<_>>(),
+            [10002, 10000]
         );
     }
 
@@ -456,12 +495,40 @@ mod tests {
     fn advance_has_cooldown_and_completion_time() {
         let now = std::cell::Cell::new(0u64);
         let mut service = AdvanceService::new(|| now.get());
-        let mut todo = item("a", Status::Todo, Priority::Medium);
+        let mut todo = item(10000, Status::Todo, Priority::Medium);
         assert!(service.advance(&mut todo, SystemTime::UNIX_EPOCH));
         assert!(!service.advance(&mut todo, SystemTime::UNIX_EPOCH));
         now.set(500);
         assert!(service.advance(&mut todo, SystemTime::UNIX_EPOCH));
         assert_eq!(todo.status, Status::Done);
+    }
+
+    #[test]
+    fn task_document_rejects_invalid_identity_group_and_counter() {
+        let first = item(10000, Status::Todo, Priority::Medium);
+        let valid = TaskDocument {
+            next_id: 10005,
+            items: vec![first.clone()],
+            ..TaskDocument::default()
+        };
+        assert!(valid.validate().is_ok());
+        let mut invalid = valid.clone();
+        invalid.next_id = 10000;
+        assert!(invalid.validate().is_err());
+        invalid = valid.clone();
+        invalid.items.push(first);
+        assert!(invalid.validate().is_err());
+        for group in ["", " ", " 前导空格"] {
+            invalid = valid.clone();
+            invalid.items[0].group = group.into();
+            assert!(invalid.validate().is_err());
+        }
+        let empty = TaskDocument {
+            items: Vec::new(),
+            ..valid
+        };
+        assert_eq!(empty.next_id, 10005);
+        assert!(empty.validate().is_ok());
     }
 
     #[test]

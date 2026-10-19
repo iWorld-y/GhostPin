@@ -1,7 +1,8 @@
 import Foundation
 
 public struct TodoItem: Identifiable, Codable, Equatable, Sendable {
-    public let id: UUID
+    public let id: Int64
+    public var group: String
     public var title: String
     public let createdAt: Date
     public var status: TodoStatus
@@ -13,7 +14,8 @@ public struct TodoItem: Identifiable, Codable, Equatable, Sendable {
     public var description: String?
 
     public init(
-        id: UUID = UUID(),
+        id: Int64,
+        group: String,
         title: String,
         createdAt: Date = Date(),
         status: TodoStatus? = nil,
@@ -25,6 +27,7 @@ public struct TodoItem: Identifiable, Codable, Equatable, Sendable {
         description: String? = nil
     ) {
         self.id = id
+        self.group = group
         self.title = title
         self.createdAt = createdAt
         self.status = status ?? (completedAt == nil ? .todo : .done)
@@ -38,7 +41,8 @@ public struct TodoItem: Identifiable, Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try container.decode(UUID.self, forKey: .id)
+        self.id = try container.decode(Int64.self, forKey: .id)
+        self.group = try container.decode(String.self, forKey: .group)
         self.title = try container.decode(String.self, forKey: .title)
         self.createdAt = try container.decode(Date.self, forKey: .createdAt)
         self.completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)

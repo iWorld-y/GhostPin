@@ -5,10 +5,11 @@ use ghostpin_native::core::{
     normalize_hotkey, project, valid_hotkey,
 };
 
-fn item(id: &str, status: Status, priority: Priority) -> Todo {
+fn item(id: u64, status: Status, priority: Priority) -> Todo {
     Todo {
-        id: id.into(),
-        title: id.into(),
+        id,
+        group: "默认".into(),
+        title: id.to_string(),
         created_at: SystemTime::UNIX_EPOCH,
         status,
         completed_at: None,
@@ -22,9 +23,9 @@ fn item(id: &str, status: Status, priority: Priority) -> Todo {
 
 fn check_projection() -> bool {
     let source = vec![
-        item("todo", Status::Todo, Priority::High),
-        item("done", Status::Done, Priority::High),
-        item("doing", Status::Doing, Priority::Low),
+        item(10000, Status::Todo, Priority::High),
+        item(10001, Status::Done, Priority::High),
+        item(10002, Status::Doing, Priority::Low),
     ];
     let result = project(
         &source,
@@ -35,18 +36,13 @@ fn check_projection() -> bool {
             today_start: SystemTime::UNIX_EPOCH,
         },
     );
-    result
-        .items
-        .iter()
-        .map(|item| item.id.as_str())
-        .collect::<Vec<_>>()
-        == ["doing", "todo"]
+    result.items.iter().map(|item| item.id).collect::<Vec<_>>() == [10002, 10000]
 }
 
 fn check_advance_cooldown() -> bool {
     let now = Cell::new(0u64);
     let mut service = AdvanceService::new(|| now.get());
-    let mut todo = item("advance", Status::Todo, Priority::Medium);
+    let mut todo = item(10000, Status::Todo, Priority::Medium);
     service.advance(&mut todo, SystemTime::UNIX_EPOCH)
         && !service.advance(&mut todo, SystemTime::UNIX_EPOCH)
         && {

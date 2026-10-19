@@ -4,46 +4,46 @@ import Foundation
 public final class TodoStore: ObservableObject {
     @Published public private(set) var items: [TodoItem]
 
-    private let fileURL: URL
-    private let fileManager: FileManager
+    private let storage: TaskStorage
 
     public init(
         fileURL: URL,
+        legacyFileURL: URL? = nil,
         fileManager: FileManager = .default,
         initialItems: [TodoItem] = []
     ) {
-        self.fileURL = fileURL
-        self.fileManager = fileManager
+        self.storage = TaskStorage(fileURL: fileURL, legacyFileURL: legacyFileURL, fileManager: fileManager)
         self.items = Self.sortByCreatedAtDescending(initialItems)
     }
 
     public convenience init(fileManager: FileManager = .default) throws {
-        try self.init(fileURL: StorageLocations.todosURL(fileManager: fileManager), fileManager: fileManager)
-        try load()
+        try self.init(
+            fileURL: StorageLocations.todosURL(fileManager: fileManager),
+            legacyFileURL: StorageLocations.legacyTodosURL(fileManager: fileManager),
+            fileManager: fileManager
+        )
     }
 
     public func load() throws {
-        do {
-            let loaded = Self.sortByCreatedAtDescending(
-                try JSONFile.load([TodoItem].self, from: fileURL, fileManager: fileManager)
-            )
-            if try JSONFile.canonicalData(loaded) != JSONFile.canonicalData(items) {
-                items = loaded
-            }
-        } catch CocoaError.fileNoSuchFile {
-            if !items.isEmpty {
-                items = []
-            }
-        }
+        try transact(write: false) { _ in () }
     }
 
-    public func save() throws {
-        try JSONFile.save(items, to: fileURL, fileManager: fileManager)
+    private func transact<Result>(
+        write: Bool = true,
+        _ operation: (inout TaskDocument) throws -> Result
+    ) throws -> Result {
+        let (result, document) = try storage.access(write: write, operation)
+        let loaded = Self.sortByCreatedAtDescending(document.items)
+        if try JSONFile.canonicalData(loaded) != JSONFile.canonicalData(items) {
+            items = loaded
+        }
+        return result
     }
 
     @discardableResult
     public func add(
         title: String,
+        group: String,
         createdAt: Date = Date(),
         reminderAt: Date? = nil,
         priority: Priority = .medium,
@@ -55,18 +55,42 @@ public final class TodoStore: ObservableObject {
             return nil
         }
 
-        let item = TodoItem(
-            title: trimmed,
-            createdAt: createdAt,
-            reminderAt: reminderAt,
-            priority: priority,
-            dueAt: dueAt,
-            description: description
-        )
-        items.append(item)
-        items = Self.sortByCreatedAtDescending(items)
-        try save()
-        return item
+        let normalizedGroup = try TaskGroup.normalize(group)
+        return try transact { document in
+            guard document.nextID <= TaskDocument.maximumID else {
+                throw TaskStorageError.invalidDocument("任务编号已用尽")
+            }
+            let item = TodoItem(
+                id: document.nextID,
+                group: normalizedGroup,
+                title: trimmed,
+                createdAt: createdAt,
+                reminderAt: reminderAt,
+                priority: priority,
+                dueAt: dueAt,
+                description: description
+            )
+            document.nextID += 1
+            document.items.append(item)
+            return item
+        }
+    }
+
+    private func change(
+        _ id: TodoItem.ID,
+        _ operation: (inout TodoItem) -> Void
+    ) throws -> TodoItem? {
+        do {
+            return try transact { document in
+                guard let index = document.items.firstIndex(where: { $0.id == id }) else {
+                    throw TaskStorageError.itemNotFound(id)
+                }
+                operation(&document.items[index])
+                return document.items[index]
+            }
+        } catch TaskStorageError.itemNotFound {
+            return nil
+        }
     }
 
     @discardableResult
@@ -75,16 +99,26 @@ public final class TodoStore: ObservableObject {
         status: TodoStatus,
         at date: Date = Date()
     ) throws -> TodoItem? {
-        guard let index = items.firstIndex(where: { $0.id == id }) else {
-            return nil
+        try change(id) { item in
+            guard item.status != status else { return }
+            item.status = status
+            item.completedAt = status == .done ? date : nil
         }
-        guard items[index].status != status else {
-            return items[index]
+    }
+
+    @discardableResult
+    public func advanceStatus(_ id: TodoItem.ID, at date: Date = Date()) throws -> TodoItem? {
+        try change(id) { item in
+            switch item.status {
+            case .todo:
+                item.status = .doing
+            case .doing:
+                item.status = .done
+                item.completedAt = date
+            case .done:
+                break
+            }
         }
-        items[index].status = status
-        items[index].completedAt = status == .done ? date : nil
-        try save()
-        return items[index]
     }
 
     public func setCompleted(_ id: TodoItem.ID, completed: Bool, at date: Date = Date()) throws {
@@ -92,59 +126,56 @@ public final class TodoStore: ObservableObject {
     }
 
     public func markTimedReminderSent(_ id: TodoItem.ID, at date: Date = Date()) throws {
-        guard let index = items.firstIndex(where: { $0.id == id }) else {
-            return
-        }
-        items[index].reminderSentAt = date
-        try save()
+        _ = try change(id) { $0.reminderSentAt = date }
     }
 
     @discardableResult
     public func updateTitle(_ id: TodoItem.ID, title: String) throws -> TodoItem? {
-        guard let current = items.first(where: { $0.id == id }) else {
-            return nil
-        }
-        return try update(
-            id,
-            title: title,
-            reminderAt: current.reminderAt,
-            priority: current.priority,
-            dueAt: current.dueAt,
-            description: current.description
-        )
+        try update(id, title: title)
     }
 
     @discardableResult
     public func update(
         _ id: TodoItem.ID,
-        title: String,
-        reminderAt: Date?,
-        priority: Priority = .medium,
+        title: String? = nil,
+        reminderAt: Date? = nil,
+        clearReminder: Bool = false,
+        priority: Priority? = nil,
         dueAt: Date? = nil,
-        description: String? = nil
+        clearDue: Bool = false,
+        description: String? = nil,
+        group: String? = nil
     ) throws -> TodoItem? {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              let index = items.firstIndex(where: { $0.id == id }) else {
-            return nil
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed?.isEmpty == true { return nil }
+        let normalizedGroup = try group.map(TaskGroup.normalize)
+        return try change(id) { item in
+            if let trimmed { item.title = trimmed }
+            if reminderAt != nil || clearReminder {
+                let newReminder = clearReminder ? nil : reminderAt
+                if item.reminderAt != newReminder { item.reminderSentAt = nil }
+                item.reminderAt = newReminder
+            }
+            if let priority { item.priority = priority }
+            if dueAt != nil || clearDue { item.dueAt = clearDue ? nil : dueAt }
+            if let description { item.description = description }
+            if let normalizedGroup { item.group = normalizedGroup }
         }
-
-        let oldReminderAt = items[index].reminderAt
-        items[index].title = trimmed
-        items[index].reminderAt = reminderAt
-        items[index].priority = priority
-        items[index].dueAt = dueAt
-        items[index].description = description
-        if oldReminderAt != reminderAt {
-            items[index].reminderSentAt = nil
-        }
-        try save()
-        return items[index]
     }
 
     public func delete(_ id: TodoItem.ID) throws {
-        items.removeAll { $0.id == id }
-        try save()
+        try transact { document in
+            guard let index = document.items.firstIndex(where: { $0.id == id }) else {
+                throw TaskStorageError.itemNotFound(id)
+            }
+            document.items.remove(at: index)
+        }
+    }
+
+    public func listItems(includeCompleted: Bool = false, group: String? = nil, now: Date = Date()) throws -> [TodoItem] {
+        let normalizedGroup = try group.map(TaskGroup.normalize)
+        let selected = includeCompleted ? items : openItems(now: now)
+        return selected.filter { normalizedGroup == nil || $0.group == normalizedGroup }
     }
 
     public func openItems(now: Date = Date()) -> [TodoItem] {
@@ -221,7 +252,11 @@ public final class TodoStore: ObservableObject {
     }
 
     private static func sortByCreatedAtDescending(_ items: [TodoItem]) -> [TodoItem] {
-        items.sorted { $0.createdAt > $1.createdAt }
+        items.sorted { isNewer($0, than: $1) }
+    }
+
+    private static func isNewer(_ lhs: TodoItem, than rhs: TodoItem) -> Bool {
+        lhs.createdAt == rhs.createdAt ? lhs.id > rhs.id : lhs.createdAt > rhs.createdAt
     }
 
     private static func isOrderedBefore(_ lhs: TodoItem, _ rhs: TodoItem, now: Date) -> Bool {
@@ -241,9 +276,9 @@ public final class TodoStore: ObservableObject {
             if lhsDue != rhsDue {
                 return lhsDue < rhsDue
             }
-            return lhs.createdAt > rhs.createdAt
+            return isNewer(lhs, than: rhs)
         case (nil, nil):
-            return lhs.createdAt > rhs.createdAt
+            return isNewer(lhs, than: rhs)
         case (nil, _):
             return false
         case (_, nil):

@@ -13,6 +13,7 @@ make dev                            # 构建并启动开发版 App
 make restart                        # 构建并重启开发版 App
 make stop                           # 停止 GhostPin 进程
 make test                           # 运行全部核心行为检查
+python3 script/check_cli.py          # 构建后运行隔离 CLI 集成检查
 make verify                         # 构建 App 并验证进程可启动
 make logs                           # 启动 App 并跟踪统一日志
 make telemetry                      # 跟踪 GhostPin subsystem 日志
@@ -28,6 +29,7 @@ make dmg                            # 构建并校验 DMG
 - 所有用例定义在 `Tests/GhostPinCoreChecks/main.swift`，并须手动注册到文件顶部的 `checks` 数组，否则不会执行。目前没有单用例筛选器。
 - 任一检查失败会输出 `FAIL` 并以退出码 1 结束。日期相关用例固定使用 GMT+8、`zh_CN` 日历，不要擅自更改。
 - Core 改动至少运行 `make test`；CLI 改动运行 `make build` 并为下沉到 Core 的行为运行 `make test`；AppKit/SwiftUI、窗口或设置改动运行 `make verify`；打包改动运行 `make dmg`。
+- CLI 参数与输出检查使用 `python3 script/check_cli.py`。Debug 的 `GHOSTPIN_TEST_SUPPORT_ROOT` 仅供隔离验证，Release 不包含该入口。`make verify` 使用临时任务目录并只清理自己启动的进程。
 
 ## Project Structure
 
@@ -43,11 +45,13 @@ make dmg                            # 构建并校验 DMG
 ## Agent Native 与数据边界
 
 - 处理真实 GhostPin 待办前，先读取 `skills/ghostpin-cli/SKILL.md`，并使用固定入口 `/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli`；不要直接编辑 `todos.json`，也不要用 `.build`、PATH 或 `swift run` 代替已安装 CLI。
-- 修改已有任务前先用 `list --all --json` 获取真实 UUID；同名无法消歧时先询问；写后检查 JSON 和退出码，删除后再次查询确认。
+- 修改已有任务前先用 `list --all --json` 获取真实整数 ID，可加 `--group` 限定组别；同名无法消歧时先询问；写后检查 ID、组别、JSON 和退出码，删除后再次查询确认。
+- 新增必须显式传入 `--group`，上下文未明确组别时先询问。内置组为 `默认`，不允许未分组；组别标记位于优先级右侧，两者在卡片标题行整体右对齐，组名最多显示三个汉字的文本宽度。
 - HUD 当前唯一允许的任务写交互是状态推进：`Todo → Doing → Done`（`AppState.advanceStatus`）。新增、字段编辑、重开和删除仍只能通过 CLI；不要给 App 增加这些录入 UI。
 - 全局快捷键只用于切换 HUD 穿透/交互模式，默认关闭且由用户在「高级」设置中配置；不要增加其他全局快捷键。
 - App 通过 `TodoFileWatcher` 监听 CLI 写入并重新加载；业务逻辑下沉到 `GhostPinCore`，`AppState` 只做服务和 UI 编排。
-- 任务数据位于 `~/Library/Application Support/GhostPin/todos.json`，偏好位于 UserDefaults。首次升级可从旧 `TodoPin/todos.json` 复制数据并保留源文件，不要破坏该兼容逻辑。
+- 任务数据位于 `~/Library/Application Support/GhostPin/todos.json`，偏好位于 UserDefaults。任务文档为 `{schemaVersion: 2, nextID, items}`，整数 ID 从 `10000` 开始且删除后不复用。全部任务写入必须在固定 `.todos.lock` 内重读、修改并原子提交，禁止写回旧快照或重算计数器。
+- 首次成功访问旧 UUID 数组时，备份原始字节到同目录 `todos.v1.backup.json`，统一迁入 `默认` 并稳定编号。支持从旧 `TodoPin/todos.json` 读取且保留源文件；GhostPin 文件优先。升级前退出旧进程，迁移与回退边界见 `docs/task-storage.md`，开发检查不得迁移真实待办。
 - `reminderAt` 到点触发本地通知，发送后记录 `reminderSentAt`；没有周期提醒或免打扰策略。
 
 ## Code Style

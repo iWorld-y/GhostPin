@@ -192,7 +192,13 @@ private struct DesktopNoteCardView: View {
                         .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    priorityBadge
+                    Spacer(minLength: 0)
+
+                    HStack(spacing: 4) {
+                        priorityBadge
+                        groupBadge
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
                 }
 
                 if let description = item.description, !description.isEmpty {
@@ -211,8 +217,7 @@ private struct DesktopNoteCardView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(12)
         .background(cardBackground)
@@ -246,6 +251,22 @@ private struct DesktopNoteCardView: View {
             .background(priorityColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
             .foregroundStyle(priorityColor)
     }
+
+    private var groupBadge: some View {
+        Text(item.group)
+            .font(.system(size: 10, weight: .semibold))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: Self.groupTextWidth)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .foregroundStyle(.secondary)
+    }
+
+    private static let groupTextWidth = ("汉汉汉" as NSString).size(
+        withAttributes: [.font: NSFont.systemFont(ofSize: 10, weight: .semibold)]
+    ).width
 
     private var priorityLabel: String {
         switch item.priority {

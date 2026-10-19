@@ -30,8 +30,9 @@ use windows::{
             DirectWrite::{
                 DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
                 DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                DWRITE_MEASURING_MODE_NATURAL, DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory,
-                IDWriteFactory, IDWriteTextFormat,
+                DWRITE_MEASURING_MODE_NATURAL, DWRITE_TEXT_METRICS, DWRITE_TRIMMING,
+                DWRITE_TRIMMING_GRANULARITY_CHARACTER, DWRITE_WORD_WRAPPING_NO_WRAP,
+                DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat,
             },
             Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
             Gdi::{
@@ -76,6 +77,9 @@ pub struct HudSurface {
     factory: ID2D1Factory,
     target: ID2D1DCRenderTarget,
     brand_bitmap: Option<ID2D1Bitmap>,
+    write_factory: IDWriteFactory,
+    badge_format: IDWriteTextFormat,
+    group_text_width: f32,
     title_format: IDWriteTextFormat,
     section_format: IDWriteTextFormat,
     body_format: IDWriteTextFormat,
@@ -99,6 +103,10 @@ impl HudSurface {
         let body_format = create_format(&write_factory, 14.0, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
         let secondary_format = create_format(&write_factory, 11.0, DWRITE_FONT_WEIGHT_NORMAL)?;
         let empty_format = create_format(&write_factory, 13.0, DWRITE_FONT_WEIGHT_NORMAL)?;
+        let badge_format = create_format(&write_factory, 10.0, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
+        set_tail_trimming(&write_factory, &badge_format)?;
+        set_tail_trimming(&write_factory, &body_format)?;
+        let group_text_width = measure_text(&write_factory, &badge_format, "汉汉汉")?;
         // SAFETY: the factory and immutable property structure are valid for this call.
         let target = unsafe { factory.CreateDCRenderTarget(&render_target_properties()) }
             .map_err(|e| RenderError(format!("CreateDCRenderTarget: {e}")))?;
@@ -111,6 +119,9 @@ impl HudSurface {
             factory,
             target,
             brand_bitmap: None,
+            write_factory,
+            badge_format,
+            group_text_width,
             title_format,
             section_format,
             body_format,
@@ -303,7 +314,7 @@ impl HudSurface {
             top += 24.0;
         }
         for item in &projection.doing {
-            top = self.draw_card(item, top, &card, &border, &text, &secondary, &accent);
+            top = self.draw_card(item, top, &card, &border, &text, &secondary, &accent)?;
         }
         if projection.todo.is_empty() == false {
             self.draw_text(
@@ -315,7 +326,7 @@ impl HudSurface {
             top += 24.0;
         }
         for item in &projection.todo {
-            top = self.draw_card(item, top, &card, &border, &text, &secondary, &accent);
+            top = self.draw_card(item, top, &card, &border, &text, &secondary, &accent)?;
         }
         if projection.items.is_empty() {
             self.draw_text(
@@ -406,7 +417,7 @@ impl HudSurface {
                 format,
                 &layout,
                 brush,
-                windows::Win32::Graphics::Direct2D::D2D1_DRAW_TEXT_OPTIONS_NONE,
+                windows::Win32::Graphics::Direct2D::D2D1_DRAW_TEXT_OPTIONS_CLIP,
                 DWRITE_MEASURING_MODE_NATURAL,
             );
         }
@@ -420,7 +431,7 @@ impl HudSurface {
         text: &ID2D1Brush,
         secondary: &ID2D1Brush,
         accent: &ID2D1Brush,
-    ) -> f32 {
+    ) -> Result<f32, RenderError> {
         let bottom = top + 72.0;
         let panel = rounded(24.0, top, (self.width - 24) as f32, bottom, 16.0);
         unsafe {
@@ -436,19 +447,51 @@ impl HudSurface {
             };
             self.target.FillEllipse(&button, accent);
         }
+        let right = (self.width - 38) as f32;
+        let group_width = measure_text(&self.write_factory, &self.badge_format, &item.group)?
+            .min(self.group_text_width)
+            + 10.0;
+        let group_left = right - group_width;
+        let priority_width = measure_text(
+            &self.write_factory,
+            &self.badge_format,
+            priority_text(item.priority),
+        )? + 10.0;
+        let priority_left = group_left - 4.0 - priority_width;
+        for (label, left, badge_right) in [
+            (
+                priority_text(item.priority),
+                priority_left,
+                group_left - 4.0,
+            ),
+            (item.group.as_str(), group_left, right),
+        ] {
+            let badge = rounded(left, top + 14.0, badge_right, top + 30.0, 4.0);
+            // SAFETY: badge geometry and brushes remain live for this draw call.
+            unsafe {
+                self.target.FillRoundedRectangle(&badge, border);
+            }
+            self.draw_text(
+                label,
+                rect(left + 5.0, top + 15.0, badge_right - 5.0, top + 29.0),
+                &self.badge_format,
+                secondary,
+            );
+        }
         self.draw_text(
             &item.title.chars().take(40).collect::<String>(),
-            rect(70.0, top + 12.0, (self.width - 38) as f32, top + 34.0),
+            rect(70.0, top + 12.0, priority_left - 6.0, top + 34.0),
             &self.body_format,
             text,
         );
-        let mut detail = priority_text(item.priority).to_string();
+        let mut detail = String::new();
         if let Some(due) = item.due_at {
-            detail.push_str("  ·  ");
             detail.push_str(&format_due(due));
         }
         if let Some(description) = &item.description {
-            detail.push_str("  ·  ");
+            if !detail.is_empty() {
+                detail.push_str("  ·  ");
+            }
             detail.push_str(&description.chars().take(18).collect::<String>());
         }
         self.draw_text(
@@ -457,10 +500,10 @@ impl HudSurface {
             &self.secondary_format,
             secondary,
         );
-        bottom + 8.0
+        Ok(bottom + 8.0)
     }
 
-    pub fn hit_regions(&self, projection: &Projection) -> Vec<(String, RECT)> {
+    pub fn hit_regions(&self, projection: &Projection) -> Vec<(u64, RECT)> {
         let mut regions = Vec::new();
         let mut top = 82;
         if !projection.doing.is_empty() {
@@ -469,12 +512,12 @@ impl HudSurface {
         for item in &projection.doing {
             let bottom = top + 72;
             regions.push((
-                item.id.clone(),
+                item.id,
                 RECT {
-                    left: self.width - 72,
-                    top,
-                    right: self.width - 24,
-                    bottom,
+                    left: 30,
+                    top: top + 20,
+                    right: 62,
+                    bottom: top + 52,
                 },
             ));
             top = bottom + 8;
@@ -485,12 +528,12 @@ impl HudSurface {
         for item in &projection.todo {
             let bottom = top + 72;
             regions.push((
-                item.id.clone(),
+                item.id,
                 RECT {
-                    left: self.width - 72,
-                    top,
-                    right: self.width - 24,
-                    bottom,
+                    left: 30,
+                    top: top + 20,
+                    right: 62,
+                    bottom: top + 52,
                 },
             ));
             top = bottom + 8;
@@ -551,6 +594,47 @@ impl Drop for HudSurface {
     fn drop(&mut self) {
         self.release_surface();
     }
+}
+
+fn set_tail_trimming(
+    factory: &IDWriteFactory,
+    format: &IDWriteTextFormat,
+) -> Result<(), RenderError> {
+    // SAFETY: factory and format are live COM objects on the render thread.
+    unsafe {
+        let ellipsis = factory
+            .CreateEllipsisTrimmingSign(format)
+            .map_err(|error| RenderError(format!("CreateEllipsisTrimmingSign: {error}")))?;
+        format
+            .SetTrimming(
+                &DWRITE_TRIMMING {
+                    granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+                    delimiter: 0,
+                    delimiterCount: 0,
+                },
+                &ellipsis,
+            )
+            .map_err(|error| RenderError(format!("SetTrimming: {error}")))
+    }
+}
+
+fn measure_text(
+    factory: &IDWriteFactory,
+    format: &IDWriteTextFormat,
+    value: &str,
+) -> Result<f32, RenderError> {
+    let wide: Vec<u16> = value.encode_utf16().collect();
+    let mut metrics = DWRITE_TEXT_METRICS::default();
+    // SAFETY: the UTF-16 slice and output metrics remain valid throughout these calls.
+    unsafe {
+        let layout = factory
+            .CreateTextLayout(&wide, format, 1_000_000.0, 100.0)
+            .map_err(|error| RenderError(format!("CreateTextLayout: {error}")))?;
+        layout
+            .GetMetrics(&mut metrics)
+            .map_err(|error| RenderError(format!("GetMetrics: {error}")))?;
+    }
+    Ok(metrics.widthIncludingTrailingWhitespace)
 }
 
 fn create_format(

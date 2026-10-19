@@ -27,7 +27,7 @@ GhostPin 是 Agent 的本地任务面板。Agent 通过命令行读取和修改�
 ## 功能
 
 - 桌面幽灵 HUD：无边框、始终置顶、透明度可调，默认鼠标点击穿透；窗口位置、尺寸、透明度、模式与显示范围重启后自动恢复。
-- HUD 只读展示：标题、优先级、截止日期、描述、过期删除线；唯一交互是勾选完成。
+- HUD 统一展示所有组的任务：标题、优先级、组别、截止日期、描述、过期删除线；唯一交互是状态推进。优先级和组别标记在标题行右对齐，组名最多显示三个汉字的文本宽度，超出部分尾部省略。
 - 菜单栏托盘：未完成数量徽标、显示/隐藏桌面便签、交互模式开关、设置、退出。设置包含 HUD 页与「高级」页（可选全局快捷键）。
 - 本地 macOS 通知：任务提醒时间到点通知；支持登录时启动。
 - ghostpin-cli 命令行工具：查询、新增、状态切换、修改、删除、JSON 输出和命令级帮助。
@@ -41,7 +41,9 @@ GhostPin 采用本地优先设计。
 - 偏好设置保存在 macOS UserDefaults。
 - 应用除构建依赖外不联网。
 
-从旧版本升级时，首次访问会把 `~/Library/Application Support/TodoPin/todos.json` 复制到 GhostPin 目录并保留旧文件；之后只使用 GhostPin 文件。升级前请退出旧 App，回退时先备份两个目录中的任务文件并手动选择要恢复的版本。
+任务使用包含 `schemaVersion: 2`、`nextID` 和 `items` 的文档，ID 为从 `10000` 开始的整数，所有组共享编号且删除后不复用。旧 UUID 数组首次成功访问时统一迁入 `默认`，原始字节保存在同目录的 `todos.v1.backup.json`。GhostPin 文件不存在时仍可从旧 `TodoPin/todos.json` 升级，并保留旧源文件。
+
+升级前退出旧 App 和 CLI，同时更新应用与随包 CLI。旧程序不支持新文档，旧 UUID 不再用于任务操作。回退只恢复迁移时快照，升级后新增和修改需另外保留；详见[任务存储与升级](docs/task-storage.md)。
 
 ## 安装
 
@@ -74,8 +76,11 @@ ghostpin-cli 随应用安装在 App Bundle 内。用户向 Skill 使用固定完
 # 查询全部任务
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli list --all --json
 
-# 新增任务
-/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli add "整理周报" --priority medium --due "2026-08-20T18:00:00+08:00" --description "汇总本周数据" --json
+# 按组查询，也可加 --all
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli list --group GhostPin --json
+
+# 新增任务，必须指定组别
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli add "整理周报" --group 默认 --priority medium --due "2026-08-20T18:00:00+08:00" --description "汇总本周数据" --json
 
 # 修改状态
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli doing <id> --json
@@ -83,6 +88,7 @@ ghostpin-cli 随应用安装在 App Bundle 内。用户向 Skill 使用固定完
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli undone <id> --json
 
 # 修改任务字段
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --group GhostPin --json
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --title "整理并发送周报" --priority high --due "2026-08-21T18:00:00+08:00" --description "发送给团队" --json
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --clear-due --json
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --clear-reminder --json
@@ -91,7 +97,7 @@ ghostpin-cli 随应用安装在 App Bundle 内。用户向 Skill 使用固定完
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli delete <id> --json
 ```
 
-提醒时间和截止日期必须使用带时区的 ISO8601。命令返回非零退出码时视为失败。
+`<id>` 必须来自真实查询结果，为十进制整数。每条任务只属于一个组，组名去掉首尾空白后精确、区分大小写地匹配；新增必须显式选择组别，允许指定 `默认`。HUD 保持统一列表，长组名完整保存在数据与 CLI 中。提醒时间和截止日期必须使用带时区的 ISO8601。命令返回非零退出码时视为失败。
 
 ## 从源码构建
 
@@ -104,7 +110,7 @@ macOS 环境要求：
 Windows 环境要求：
 
 - Windows 11 x64
-- Rust MSVC 工具链
+- Rust 1.89 或更新的 MSVC 工具链
 - Visual Studio Build Tools（MSVC 与 Windows SDK，仅源码构建需要）
 
 日常开发建议使用 Makefile：
@@ -116,6 +122,7 @@ make restart              # 构建并重启 App
 make stop                 # 停止 App
 make logs                 # 启动 App 并跟踪日志
 make test                 # 运行核心行为检查
+python3 script/check_cli.py # 构建后运行隔离 CLI 检查
 make cli ARGS='list --json' # 执行开发版 CLI
 make package              # 根据平台生成 DMG 或 Windows 单文件 EXE
 ```

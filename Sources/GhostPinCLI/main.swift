@@ -75,15 +75,20 @@ private func runList(_ arguments: [String]) throws {
         printCommandHelp("list")
         return
     }
-    let parsed = try parseArguments(arguments, valueFlags: [], booleanFlags: ["--all", "--json"])
+    let parsed = try parseArguments(arguments, valueFlags: ["--group"], booleanFlags: ["--all", "--json"])
+    guard parsed.positionals.isEmpty else {
+        throw CLIError(message: "用法: \(usageText(for: "list"))", code: .usageError)
+    }
+    let group = try parseGroup(parsed.values["--group"])
     let store = try makeStore()
-    let items = parsed.flags.contains("--all") ? store.items : store.openItems()
+    try store.load()
+    let items = try store.listItems(includeCompleted: parsed.flags.contains("--all"), group: group)
 
     if jsonRequested {
         try printJSON(items.map(TodoItemPayload.init))
     } else {
         for item in items {
-            print("\(item.id.uuidString)\t\(item.status.rawValue)\t\(item.title)")
+            print("\(item.id)\t\(item.status.rawValue)\t\(item.group)\t\(item.title)")
         }
     }
 }
@@ -95,7 +100,7 @@ private func runAdd(_ arguments: [String]) throws {
     }
     let parsed = try parseArguments(
         arguments,
-        valueFlags: ["--reminder", "--priority", "--due", "--description"],
+        valueFlags: ["--group", "--reminder", "--priority", "--due", "--description"],
         booleanFlags: ["--json"]
     )
     guard !parsed.positionals.isEmpty else {
@@ -104,6 +109,9 @@ private func runAdd(_ arguments: [String]) throws {
     let title = parsed.positionals.joined(separator: " ")
     guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         throw CLIError(message: "任务标题不能为空", code: .usageError)
+    }
+    guard let group = try parseGroup(parsed.values["--group"]) else {
+        throw CLIError(message: "新增任务必须指定 --group <组名>", code: .usageError)
     }
 
     var reminderAt: Date?
@@ -117,6 +125,7 @@ private func runAdd(_ arguments: [String]) throws {
     let store = try makeStore()
     guard let item = try store.add(
         title: title,
+        group: group,
         reminderAt: reminderAt,
         priority: priority,
         dueAt: dueAt,
@@ -133,15 +142,15 @@ private func runSetStatus(_ arguments: [String], status: TodoStatus, commandName
         return
     }
     let parsed = try parseArguments(arguments, valueFlags: [], booleanFlags: ["--json"])
-    guard let idString = parsed.positionals.first else {
+    guard parsed.positionals.count == 1, let idString = parsed.positionals.first else {
         throw CLIError(message: "用法: \(usageText(for: commandName))", code: .usageError)
     }
 
     let id = try resolveID(idString)
     let store = try makeStore()
-    _ = try requireItem(id, in: store)
-    try store.setStatus(id, status: status)
-    let updated = try requireItem(id, in: store)
+    guard let updated = try store.setStatus(id, status: status) else {
+        throw TaskStorageError.itemNotFound(id)
+    }
     try successOutput(updated)
 }
 
@@ -152,10 +161,10 @@ private func runUpdate(_ arguments: [String]) throws {
     }
     let parsed = try parseArguments(
         arguments,
-        valueFlags: ["--title", "--reminder", "--priority", "--due", "--description"],
+        valueFlags: ["--title", "--group", "--reminder", "--priority", "--due", "--description"],
         booleanFlags: ["--json", "--clear-reminder", "--clear-due"]
     )
-    guard let idString = parsed.positionals.first else {
+    guard parsed.positionals.count == 1, let idString = parsed.positionals.first else {
         throw CLIError(message: "用法: \(usageText(for: "update"))", code: .usageError)
     }
 
@@ -166,54 +175,34 @@ private func runUpdate(_ arguments: [String]) throws {
     let hasDue = parsed.values["--due"] != nil
     let clearsDue = parsed.flags.contains("--clear-due")
     let hasDescription = parsed.values["--description"] != nil
-    guard hasTitle || hasReminder || clearsReminder || hasPriority || hasDue || clearsDue || hasDescription else {
+    let hasGroup = parsed.values["--group"] != nil
+    guard hasTitle || hasReminder || clearsReminder || hasPriority || hasDue || clearsDue || hasDescription || hasGroup else {
         throw CLIError(message: "update 至少需要指定一项修改参数", code: .usageError)
     }
 
     let id = try resolveID(idString)
-    let store = try makeStore()
-    let current = try requireItem(id, in: store)
-
-    var newTitle = current.title
     if let title = parsed.values["--title"] {
         guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CLIError(message: "任务标题不能为空", code: .usageError)
         }
-        newTitle = title
     }
-
-    var newReminder = current.reminderAt
-    if let raw = parsed.values["--reminder"] {
-        newReminder = try parseReminder(raw)
-    }
-    if clearsReminder {
-        newReminder = nil
-    }
-
-    var newPriority = current.priority
-    if let raw = parsed.values["--priority"] {
-        newPriority = try parsePriority(raw)
-    }
-
-    var newDue = current.dueAt
-    if let raw = parsed.values["--due"] {
-        newDue = try parseDueDate(raw)
-    }
-    if clearsDue {
-        newDue = nil
-    }
-
-    let newDescription = parsed.values["--description"] ?? current.description
-
+    let reminderAt = try parsed.values["--reminder"].map(parseReminder)
+    let priority = try parsed.values["--priority"].map { try parsePriority($0) }
+    let dueAt = try parseDueDate(parsed.values["--due"])
+    let group = try parseGroup(parsed.values["--group"])
+    let store = try makeStore()
     guard let updated = try store.update(
         id,
-        title: newTitle,
-        reminderAt: newReminder,
-        priority: newPriority,
-        dueAt: newDue,
-        description: newDescription
+        title: parsed.values["--title"],
+        reminderAt: reminderAt,
+        clearReminder: clearsReminder,
+        priority: priority,
+        dueAt: dueAt,
+        clearDue: clearsDue,
+        description: parsed.values["--description"],
+        group: group
     ) else {
-        throw CLIError(message: "更新失败", code: .runtimeError)
+        throw TaskStorageError.itemNotFound(id)
     }
     try successOutput(updated)
 }
@@ -224,19 +213,18 @@ private func runDelete(_ arguments: [String]) throws {
         return
     }
     let parsed = try parseArguments(arguments, valueFlags: [], booleanFlags: ["--json"])
-    guard let idString = parsed.positionals.first else {
+    guard parsed.positionals.count == 1, let idString = parsed.positionals.first else {
         throw CLIError(message: "用法: \(usageText(for: "delete"))", code: .usageError)
     }
 
     let id = try resolveID(idString)
     let store = try makeStore()
-    _ = try requireItem(id, in: store)
     try store.delete(id)
 
     if jsonRequested {
         try printJSON(CLIIdSuccessResponse(id: id))
     } else {
-        print(id.uuidString)
+        print(id)
     }
 }
 
@@ -267,7 +255,7 @@ private func parseArguments(
         }
         if argument.hasPrefix("--") {
             if valueFlags.contains(argument) {
-                guard index + 1 < arguments.count else {
+                guard index + 1 < arguments.count, !arguments[index + 1].hasPrefix("--") else {
                     throw CLIError(message: "缺少参数值: \(argument)", code: .usageError)
                 }
                 parsed.values[argument] = arguments[index + 1]
@@ -296,17 +284,20 @@ private func makeStore() throws -> TodoStore {
 }
 
 private func resolveID(_ string: String) throws -> TodoItem.ID {
-    guard let id = UUID(uuidString: string.uppercased()) else {
+    guard !string.isEmpty, string.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }),
+          let id = Int64(string), id >= TaskDocument.firstID, id <= TaskDocument.maximumID else {
         throw CLIError(message: "无效的任务 id: \(string)", code: .usageError)
     }
     return id
 }
 
-private func requireItem(_ id: TodoItem.ID, in store: TodoStore) throws -> TodoItem {
-    guard let item = store.items.first(where: { $0.id == id }) else {
-        throw CLIError(message: "未找到任务: \(id.uuidString)", code: .runtimeError)
+private func parseGroup(_ raw: String?) throws -> String? {
+    guard let raw else { return nil }
+    do {
+        return try TaskGroup.normalize(raw)
+    } catch {
+        throw CLIError(message: error.localizedDescription, code: .usageError)
     }
-    return item
 }
 
 private func parseReminder(_ raw: String) throws -> Date {
@@ -348,7 +339,7 @@ private func successOutput(_ item: TodoItem) throws {
     if jsonRequested {
         try printJSON(CLISuccessResponse(item: TodoItemPayload(item)))
     } else {
-        print(item.id.uuidString)
+        print(item.id)
     }
 }
 
@@ -363,13 +354,13 @@ private func wantsHelp(_ arguments: [String]) -> Bool {
 private func usageText(for command: String) -> String {
     switch command {
     case "list":
-        return "ghostpin-cli list [--all] [--json]"
+        return "ghostpin-cli list [--group <组名>] [--all] [--json]"
     case "add":
-        return "ghostpin-cli add <标题> [--reminder <ISO8601>] [--priority <high|medium|low>] [--due <ISO8601>] [--description <描述>]"
+        return "ghostpin-cli add <标题> --group <组名> [--reminder <ISO8601>] [--priority <high|medium|low>] [--due <ISO8601>] [--description <描述>]"
     case "doing", "done", "undone", "delete":
         return "ghostpin-cli \(command) <id>"
     case "update":
-        return "ghostpin-cli update <id> [--title <标题>] [--reminder <ISO8601>] [--clear-reminder] [--priority <high|medium|low>] [--due <ISO8601>] [--clear-due] [--description <描述>]"
+        return "ghostpin-cli update <id> [--group <组名>] [--title <标题>] [--reminder <ISO8601>] [--clear-reminder] [--priority <high|medium|low>] [--due <ISO8601>] [--clear-due] [--description <描述>]"
     case "version":
         return "ghostpin-cli version"
     default:
@@ -383,11 +374,13 @@ private func printCommandHelp(_ command: String) {
         print("""
         \(usageText(for: "list"))
           列出任务；默认只显示未完成任务，--all 包含已完成任务。
+          --group 按完整组名精确查询，不指定则显示所有组。
         """)
     case "add":
         print("""
         \(usageText(for: "add"))
-          新增任务。日期必须使用 ISO8601，优先级默认为 medium。
+          新增任务，必须显式指定组名，可使用内置组“默认”。组名区分大小写。
+          日期必须使用 ISO8601，优先级默认为 medium。
         """)
     case "doing", "done", "undone":
         print("""
@@ -399,6 +392,7 @@ private func printCommandHelp(_ command: String) {
         \(usageText(for: "update"))
           修改任务；至少指定一项参数，未指定的字段保持不变。
           --clear-reminder 清除提醒时间，--clear-due 清除截止时间。
+          --group 将任务移到指定组，任务 ID 保持不变。
         """)
     case "delete":
         print("""
@@ -431,6 +425,7 @@ ghostpin-cli - GhostPin 命令行工具
 
 选项:
   --json                        以 JSON 输出结果
+  <id>                          从 10000 开始的十进制整数任务 ID
   -h, --help                    显示帮助
   -v, --version                 显示版本
 """

@@ -12,6 +12,33 @@ struct CheckFailure: Error, CustomStringConvertible {
 
 typealias Check = (name: String, run: () throws -> Void)
 
+// 仅测试程序使用的子进程入口；路径由父检查显式传入。
+if CommandLine.arguments.count == 4, ["--storage-worker", "--app-worker"].contains(CommandLine.arguments[1]) {
+    do {
+        let directory = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
+        let store = makeStore(in: directory)
+        if CommandLine.arguments[1] == "--app-worker" { try store.load() }
+        let ready = directory.appendingPathComponent("ready-\(ProcessInfo.processInfo.processIdentifier)")
+        try Data().write(to: ready)
+        let deadline = Date().addingTimeInterval(5)
+        while !FileManager.default.fileExists(atPath: directory.appendingPathComponent("go").path) {
+            guard Date() < deadline else { throw CheckFailure(message: "等待并发检查超时") }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        if CommandLine.arguments[1] == "--app-worker" {
+            let id = try require(Int64(CommandLine.arguments[3]), "应为整数 ID")
+            _ = try store.advanceStatus(id)
+            try store.markTimedReminderSent(id)
+        } else {
+            _ = try store.add(title: CommandLine.arguments[3], group: "并发")
+        }
+        exit(0)
+    } catch {
+        print(error)
+        exit(1)
+    }
+}
+
 let checkCalendar: Calendar = {
     var calendar = Calendar(identifier: .gregorian)
     calendar.locale = Locale(identifier: "zh_CN")
@@ -20,6 +47,14 @@ let checkCalendar: Calendar = {
 }()
 
 let checks: [Check] = [
+    ("任务跨组递增编号且删除后不复用", checkSequentialIDsAcrossGroups),
+    ("换组和旧快照写回保留最新字段", checkGroupAndStaleWrites),
+    ("旧任务一次迁入默认组并稳定编号", checkLegacyGroupAndIDMigration),
+    ("非法新文档和备份冲突不覆盖原文件", checkInvalidDocumentsAndBackupConflict),
+    ("两个进程同时新增保留独立编号", checkConcurrentProcesses),
+    ("提交失败不发布快照且可重试迁移", checkFailedCommitAndRetry),
+    ("多组任务沿用统一 HUD 投影", checkGroupedHudProjection),
+    ("共享夹具迁移与新文档编码一致", checkSharedGroupFixtures),
     ("TodoStore.add trims title and ignores empty input", checkAddTrimsTitleAndIgnoresEmptyInput),
     ("TodoStore orders open items by createdAt descending", checkOpenItemsAreCreatedAtDescending),
     ("TodoStore.updateTitle trims persists and ignores empty input", checkUpdateTitleTrimsPersistsAndIgnoresEmptyInput),
@@ -79,11 +114,11 @@ func checkAddTrimsTitleAndIgnoresEmptyInput() throws {
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
     let store = makeStore(in: temporaryDirectory)
 
-    let empty = try store.add(title: "   \n  ")
+    let empty = try store.add(title: "   \n  ", group: "默认")
     try check(empty == nil, "empty input should not create a todo")
     try check(store.items.isEmpty, "store should stay empty")
 
-    let item = try require(try store.add(title: "  买牛奶  "), "expected a todo")
+    let item = try require(try store.add(title: "  买牛奶  ", group: "默认"), "expected a todo")
     try check(item.title == "买牛奶", "title should be trimmed")
     try check(store.items.map(\.title) == ["买牛奶"], "store should contain trimmed title")
 }
@@ -95,8 +130,8 @@ func checkOpenItemsAreCreatedAtDescending() throws {
     let older = makeDate(year: 2026, month: 6, day: 14, hour: 9, minute: 0)
     let newer = makeDate(year: 2026, month: 6, day: 14, hour: 10, minute: 0)
 
-    _ = try store.add(title: "早一点", createdAt: older)
-    _ = try store.add(title: "晚一点", createdAt: newer)
+    _ = try store.add(title: "早一点", group: "默认", createdAt: older)
+    _ = try store.add(title: "晚一点", group: "默认", createdAt: newer)
 
     try check(store.openItems().map(\.title) == ["晚一点", "早一点"], "newer todos should be listed first")
 
@@ -109,7 +144,7 @@ func checkUpdateTitleTrimsPersistsAndIgnoresEmptyInput() throws {
     let temporaryDirectory = try makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
     let store = makeStore(in: temporaryDirectory)
-    let item = try require(try store.add(title: "旧标题"), "expected a todo")
+    let item = try require(try store.add(title: "旧标题", group: "默认"), "expected a todo")
 
     let updated = try require(try store.updateTitle(item.id, title: "  新标题  "), "expected an updated todo")
     try check(updated.title == "新标题", "updated title should be trimmed")
@@ -128,12 +163,12 @@ func checkCompletedItemsAreRemovedFromOpenItems() throws {
     let temporaryDirectory = try makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
     let store = makeStore(in: temporaryDirectory)
-    let first = try require(try store.add(title: "完成的事"), "expected first todo")
-    let second = try require(try store.add(title: "继续保留"), "expected second todo")
+    let first = try require(try store.add(title: "完成的事", group: "默认"), "expected first todo")
+    let second = try require(try store.add(title: "继续保留", group: "默认"), "expected second todo")
 
     try store.setCompleted(first.id, completed: true)
 
-    try check(store.openItems() == [second], "completed todo should not be open")
+    try check(store.openItems().map(\.id) == [second.id], "completed todo should not be open")
 }
 
 func checkTodoStatusTransitions() throws {
@@ -143,7 +178,7 @@ func checkTodoStatusTransitions() throws {
     let startedAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 0)
     let completedAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 5)
 
-    let item = try require(try store.add(title: "状态任务"), "expected a todo")
+    let item = try require(try store.add(title: "状态任务", group: "默认"), "expected a todo")
     try check(item.status == .todo, "new task should be todo")
 
     let doing = try require(
@@ -180,7 +215,7 @@ func checkAddPersistsReminderTime() throws {
     let store = makeStore(in: temporaryDirectory)
     let reminderAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 30)
 
-    let item = try require(try store.add(title: "开会", reminderAt: reminderAt), "expected a todo")
+    let item = try require(try store.add(title: "开会", group: "默认", reminderAt: reminderAt), "expected a todo")
     try check(item.reminderAt == reminderAt, "todo should keep reminder time")
 
     let reloaded = makeStore(in: temporaryDirectory)
@@ -195,7 +230,7 @@ func checkAddPersistsNewFields() throws {
     let dueAt = makeDate(year: 2026, month: 6, day: 22, hour: 18, minute: 0)
 
     let item = try require(
-        try store.add(title: "带字段", priority: .high, dueAt: dueAt, description: "准备周报"),
+        try store.add(title: "带字段", group: "默认", priority: .high, dueAt: dueAt, description: "准备周报"),
         "expected a todo"
     )
     try check(item.priority == .high, "priority should persist in memory")
@@ -218,7 +253,7 @@ func checkMarkTimedReminderSentPersists() throws {
     let store = makeStore(in: temporaryDirectory)
     let reminderAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 30)
     let sentAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 31)
-    let item = try require(try store.add(title: "开会", reminderAt: reminderAt), "expected a todo")
+    let item = try require(try store.add(title: "开会", group: "默认", reminderAt: reminderAt), "expected a todo")
 
     try store.markTimedReminderSent(item.id, at: sentAt)
 
@@ -234,7 +269,7 @@ func checkUpdateChangesReminderTimeAndClearsSentTime() throws {
     let originalReminderAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 30)
     let sentAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 31)
     let changedReminderAt = makeDate(year: 2026, month: 6, day: 21, hour: 9, minute: 0)
-    let item = try require(try store.add(title: "开会", reminderAt: originalReminderAt), "expected a todo")
+    let item = try require(try store.add(title: "开会", group: "默认", reminderAt: originalReminderAt), "expected a todo")
     try store.markTimedReminderSent(item.id, at: sentAt)
 
     let updated = try require(
@@ -258,10 +293,10 @@ func checkUpdateRemovesReminderTimeAndClearsSentTime() throws {
     let store = makeStore(in: temporaryDirectory)
     let reminderAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 30)
     let sentAt = makeDate(year: 2026, month: 6, day: 20, hour: 10, minute: 31)
-    let item = try require(try store.add(title: "开会", reminderAt: reminderAt), "expected a todo")
+    let item = try require(try store.add(title: "开会", group: "默认", reminderAt: reminderAt), "expected a todo")
     try store.markTimedReminderSent(item.id, at: sentAt)
 
-    let updated = try require(try store.update(item.id, title: "开会", reminderAt: nil), "expected updated todo")
+    let updated = try require(try store.update(item.id, title: "开会", clearReminder: true), "expected updated todo")
 
     try check(updated.reminderAt == nil, "reminder time should be removed")
     try check(updated.reminderSentAt == nil, "removed reminder should clear sent time")
@@ -279,7 +314,7 @@ func checkUpdateChangesAndClearsNewFields() throws {
     let originalDueAt = makeDate(year: 2026, month: 6, day: 22, hour: 18, minute: 0)
     let changedDueAt = makeDate(year: 2026, month: 6, day: 23, hour: 9, minute: 30)
     let item = try require(
-        try store.add(title: "原任务", priority: .high, dueAt: originalDueAt, description: "原描述"),
+        try store.add(title: "原任务", group: "默认", priority: .high, dueAt: originalDueAt, description: "原描述"),
         "expected a todo"
     )
 
@@ -304,7 +339,7 @@ func checkUpdateChangesAndClearsNewFields() throws {
             title: changed.title,
             reminderAt: changed.reminderAt,
             priority: changed.priority,
-            dueAt: nil,
+            clearDue: true,
             description: changed.description
         ),
         "expected cleared todo"
@@ -315,13 +350,13 @@ func checkUpdateChangesAndClearsNewFields() throws {
 }
 
 func checkHasPendingTimedReminder() throws {
-    let futureReminder = TodoItem(title: "开会", reminderAt: Date().addingTimeInterval(3600))
+    let futureReminder = TodoItem(id: 10000, group: "默认", title: "开会", reminderAt: Date().addingTimeInterval(3600))
     try check(futureReminder.hasPendingTimedReminder, "item with future reminder should have pending timed reminder")
 
-    let completed = TodoItem(title: "已完成", completedAt: Date(), reminderAt: Date().addingTimeInterval(3600))
+    let completed = TodoItem(id: 10000, group: "默认", title: "已完成", completedAt: Date(), reminderAt: Date().addingTimeInterval(3600))
     try check(!completed.hasPendingTimedReminder, "completed item should not have pending timed reminder")
 
-    let sent = TodoItem(title: "已提醒", reminderAt: Date().addingTimeInterval(-3600), reminderSentAt: Date())
+    let sent = TodoItem(id: 10000, group: "默认", title: "已提醒", reminderAt: Date().addingTimeInterval(-3600), reminderSentAt: Date())
     try check(!sent.hasPendingTimedReminder, "sent reminder should not be pending")
 }
 
@@ -352,11 +387,17 @@ func checkMigratesLegacyStorage() throws {
         at: legacyURL.deletingLastPathComponent(),
         withIntermediateDirectories: true
     )
-    let item = TodoItem(title: "迁移任务", priority: .high)
-    let legacyData = try JSONEncoder.ghostPin.encode([item])
+    let legacyData = Data("""
+    [{"id":"00000000-0000-0000-0000-000000000001","title":"迁移任务","createdAt":"2026-06-20T02:00:00Z","priority":"high"}]
+    """.utf8)
     try legacyData.write(to: legacyURL)
 
     let todosURL = try StorageLocations.todosURL(applicationSupportRoot: temporaryDirectory)
+    let store = TodoStore(fileURL: todosURL, legacyFileURL: legacyURL)
+    try check(try store.setStatus(99999, status: .doing) == nil, "未知任务不应触发目录迁移")
+    try check(!FileManager.default.fileExists(atPath: todosURL.path), "业务失败不应复制任务")
+    try check(!FileManager.default.fileExists(atPath: todosURL.deletingLastPathComponent().appendingPathComponent("todos.v1.backup.json").path), "业务失败不应备份")
+    try store.load()
     try check(FileManager.default.fileExists(atPath: todosURL.path), "new storage should be created")
     let migratedData = try Data(contentsOf: todosURL)
     let preservedLegacyData = try Data(contentsOf: legacyURL)
@@ -364,7 +405,10 @@ func checkMigratesLegacyStorage() throws {
         at: todosURL.deletingLastPathComponent(),
         includingPropertiesForKeys: nil
     )
-    try check(migratedData == legacyData, "migration should preserve the legacy JSON content")
+    let document = try JSONDecoder.ghostPin.decode(TaskDocument.self, from: migratedData)
+    try check(document.items.first?.id == 10000 && document.items.first?.group == "默认", "目录迁移应同时升级格式")
+    try check(document.items.first?.priority == .high, "迁移应保留业务字段")
+    try check(try Data(contentsOf: todosURL.deletingLastPathComponent().appendingPathComponent("todos.v1.backup.json")) == legacyData, "备份应保留源文件原始字节")
     try check(preservedLegacyData == legacyData, "migration should preserve the legacy source")
     try check(
         migratedDirectoryContents.filter { $0.lastPathComponent.hasPrefix(".todos-") }.isEmpty,
@@ -389,12 +433,15 @@ func checkPrefersExistingGhostPinStorage() throws {
         at: legacyURL.deletingLastPathComponent(),
         withIntermediateDirectories: true
     )
-    let currentData = try JSONEncoder.ghostPin.encode([TodoItem(title: "新任务")])
-    let legacyData = try JSONEncoder.ghostPin.encode([TodoItem(title: "旧任务")])
+    let currentData = try JSONEncoder.ghostPin.encode(TaskDocument(nextID: 10001, items: [TodoItem(id: 10000, group: "当前组", title: "新任务")]))
+    let legacyData = Data("[]".utf8)
     try currentData.write(to: newURL)
     try legacyData.write(to: legacyURL)
 
     let resolvedURL = try StorageLocations.todosURL(applicationSupportRoot: temporaryDirectory)
+    let store = TodoStore(fileURL: resolvedURL, legacyFileURL: legacyURL)
+    try store.load()
+    try check(store.items.first?.title == "新任务", "应读取新目录任务")
     let preservedCurrentData = try Data(contentsOf: newURL)
     let preservedLegacyData = try Data(contentsOf: legacyURL)
     try check(resolvedURL == newURL, "existing GhostPin storage should remain authoritative")
@@ -416,7 +463,8 @@ func checkRejectsCorruptLegacyStorage() throws {
     try corruptData.write(to: legacyURL)
 
     do {
-        _ = try StorageLocations.todosURL(applicationSupportRoot: temporaryDirectory)
+        let file = try StorageLocations.todosURL(applicationSupportRoot: temporaryDirectory)
+        try TodoStore(fileURL: file, legacyFileURL: legacyURL).load()
         throw CheckFailure(message: "corrupt legacy data should fail migration")
     } catch let failure as CheckFailure {
         throw failure
@@ -439,11 +487,11 @@ func checkHudItemsTodayScopeUsesDayBoundary() throws {
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
 
     _ = try require(
-        try store.add(title: "今天任务", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 1, minute: 0)),
+        try store.add(title: "今天任务", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 1, minute: 0)),
         "expected today todo"
     )
     _ = try require(
-        try store.add(title: "昨天任务", createdAt: makeDate(year: 2026, month: 6, day: 14, hour: 23, minute: 59)),
+        try store.add(title: "昨天任务", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 14, hour: 23, minute: 59)),
         "expected yesterday todo"
     )
 
@@ -458,11 +506,11 @@ func checkHudItemsAllScopeIncludesEveryOpenItem() throws {
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
 
     _ = try require(
-        try store.add(title: "今天任务", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 1, minute: 0)),
+        try store.add(title: "今天任务", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 1, minute: 0)),
         "expected today todo"
     )
     _ = try require(
-        try store.add(title: "昨天任务", createdAt: makeDate(year: 2026, month: 6, day: 14, hour: 23, minute: 59)),
+        try store.add(title: "昨天任务", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 14, hour: 23, minute: 59)),
         "expected yesterday todo"
     )
 
@@ -479,7 +527,7 @@ func checkHudItemsTruncatesToMaxCount() throws {
     for index in 1...5 {
         _ = try require(
             try store.add(
-                title: "任务\(index)",
+                title: "任务\(index)", group: "默认",
                 createdAt: makeDate(year: 2026, month: 6, day: 15, hour: index, minute: 0)
             ),
             "expected todo"
@@ -497,8 +545,8 @@ func checkHudItemsExcludesCompletedItems() throws {
     let store = makeStore(in: temporaryDirectory)
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
 
-    let completedItem = try require(try store.add(title: "待完成"), "expected todo")
-    _ = try require(try store.add(title: "保留"), "expected todo")
+    let completedItem = try require(try store.add(title: "待完成", group: "默认"), "expected todo")
+    _ = try require(try store.add(title: "保留", group: "默认"), "expected todo")
     try store.setCompleted(completedItem.id, completed: true)
 
     let hudItems = store.hudItems(scope: .all, maxCount: 10, now: now, calendar: checkCalendar)
@@ -506,54 +554,32 @@ func checkHudItemsExcludesCompletedItems() throws {
 }
 
 func checkDecodesLegacyTodoItemWithoutNewFields() throws {
-    let item = TodoItem(title: "旧任务", reminderAt: nil)
-    let data = try JSONEncoder().encode(item)
-    guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        throw CheckFailure(message: "编码失败")
-    }
-    object.removeValue(forKey: "status")
-    object.removeValue(forKey: "priority")
-    object.removeValue(forKey: "dueAt")
-    object.removeValue(forKey: "description")
-
-    let legacyData = try JSONSerialization.data(withJSONObject: object)
-    let decoded = try JSONDecoder().decode(TodoItem.self, from: legacyData)
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let legacyURL = temporaryDirectory.appendingPathComponent("todos.json")
+    let legacyData = Data("""
+    [
+      {"id":"00000000-0000-0000-0000-000000000001","title":"旧任务","createdAt":"2026-06-20T01:00:00Z"},
+      {"id":"00000000-0000-0000-0000-000000000002","title":"旧完成任务","createdAt":"2026-06-20T02:00:00Z","completedAt":"2026-06-20T03:00:00Z"}
+    ]
+    """.utf8)
+    try legacyData.write(to: legacyURL)
+    let store = makeStore(in: temporaryDirectory)
+    try store.load()
+    let decoded = try require(store.items.first { $0.title == "旧任务" }, "应读取旧任务")
     try check(decoded.title == "旧任务", "旧数据标题应保留")
     try check(decoded.priority == .medium, "旧数据缺失 priority 应默认为中")
     try check(decoded.dueAt == nil, "旧数据缺失 dueAt 应为 nil")
     try check(decoded.description == nil, "旧数据缺失 description 应为 nil")
     try check(decoded.status == .todo, "旧的未完成任务应映射为 todo")
 
-    let completedItem = TodoItem(title: "旧完成任务", completedAt: makeDate(year: 2026, month: 6, day: 20, hour: 11, minute: 0))
-    let completedData = try JSONEncoder().encode(completedItem)
-    guard var completedObject = try JSONSerialization.jsonObject(with: completedData) as? [String: Any] else {
-        throw CheckFailure(message: "已完成旧数据编码失败")
-    }
-    completedObject.removeValue(forKey: "status")
-    let legacyCompletedData = try JSONSerialization.data(withJSONObject: completedObject)
-    let decodedCompleted = try JSONDecoder().decode(TodoItem.self, from: legacyCompletedData)
+    let decodedCompleted = try require(store.items.first { $0.title == "旧完成任务" }, "应读取已完成旧任务")
     try check(decodedCompleted.status == .done, "旧的已完成任务应映射为 done")
     try check(decodedCompleted.isCompleted, "旧的已完成任务应保持完成")
 
-    let temporaryDirectory = try makeTemporaryDirectory()
-    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
-    let legacyURL = temporaryDirectory.appendingPathComponent("todos.json")
-    let fileEncoded = try JSONEncoder.ghostPin.encode(item)
-    guard var fileObject = try JSONSerialization.jsonObject(with: fileEncoded) as? [String: Any] else {
-        throw CheckFailure(message: "文件格式旧数据编码失败")
-    }
-    fileObject.removeValue(forKey: "status")
-    fileObject.removeValue(forKey: "priority")
-    fileObject.removeValue(forKey: "dueAt")
-    fileObject.removeValue(forKey: "description")
-    let legacyListData = try JSONSerialization.data(withJSONObject: [fileObject])
-    try legacyListData.write(to: legacyURL)
-    let store = makeStore(in: temporaryDirectory)
-    try store.load()
-    try store.save()
     let migrated = makeStore(in: temporaryDirectory)
     try migrated.load()
-    try check(migrated.items.first?.status == .todo, "旧数据保存后应保留 todo 状态")
+    try check(migrated.items.first { $0.title == "旧任务" }?.status == .todo, "旧数据保存后应保留 todo 状态")
 }
 
 func checkDoingItemsAreSortedBeforeTodoItems() throws {
@@ -563,12 +589,12 @@ func checkDoingItemsAreSortedBeforeTodoItems() throws {
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
 
     let doing = try require(
-        try store.add(title: "Doing-低", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 9, minute: 0), priority: .low),
+        try store.add(title: "Doing-低", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 9, minute: 0), priority: .low),
         "expected doing task"
     )
     _ = try store.setStatus(doing.id, status: .doing, at: now)
     _ = try store.add(
-        title: "Todo-高",
+        title: "Todo-高", group: "默认",
         createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 10, minute: 0),
         priority: .high
     )
@@ -585,10 +611,10 @@ func checkHudProjectionFocusesDoing() throws {
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
     let store = makeStore(in: temporaryDirectory)
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
-    let doing = try require(try store.add(title: "进行中"), "expected doing task")
+    let doing = try require(try store.add(title: "进行中", group: "默认"), "expected doing task")
     _ = try store.setStatus(doing.id, status: .doing, at: now)
-    _ = try store.add(title: "待办一")
-    _ = try store.add(title: "待办二")
+    _ = try store.add(title: "待办一", group: "默认")
+    _ = try store.add(title: "待办二", group: "默认")
 
     let projection = store.hudProjection(scope: .all, maxCount: 10, focusDoing: true, now: now, calendar: checkCalendar)
     try check(projection.doing.map(\.title) == ["进行中"], "聚焦时应渲染 Doing，实际: \(projection.doing.map(\.title))")
@@ -602,7 +628,7 @@ func checkHudProjectionWithoutDoingShowsTodo() throws {
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
     let store = makeStore(in: temporaryDirectory)
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
-    _ = try store.add(title: "待办一")
+    _ = try store.add(title: "待办一", group: "默认")
 
     let projection = store.hudProjection(scope: .all, maxCount: 10, focusDoing: true, now: now, calendar: checkCalendar)
     try check(projection.doing.isEmpty, "无 Doing 时 Doing 组应为空")
@@ -616,12 +642,12 @@ func checkHudProjectionDisabledShowsBothSections() throws {
     let store = makeStore(in: temporaryDirectory)
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
     let doing = try require(
-        try store.add(title: "进行中", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 9, minute: 0), priority: .low),
+        try store.add(title: "进行中", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 9, minute: 0), priority: .low),
         "expected doing task"
     )
     _ = try store.setStatus(doing.id, status: .doing, at: now)
     _ = try store.add(
-        title: "待办-高",
+        title: "待办-高", group: "默认",
         createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 10, minute: 0),
         priority: .high
     )
@@ -644,13 +670,13 @@ func checkHudProjectionLimitAppliesToRenderedItems() throws {
     let store = makeStore(in: temporaryDirectory)
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
     let doing = try require(
-        try store.add(title: "进行中", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 9, minute: 0), priority: .low),
+        try store.add(title: "进行中", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 9, minute: 0), priority: .low),
         "expected doing task"
     )
     _ = try store.setStatus(doing.id, status: .doing, at: now)
     for index in 0..<5 {
         _ = try store.add(
-            title: "待办-高\(index)",
+            title: "待办-高\(index)", group: "默认",
             createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 10, minute: index),
             priority: .high
         )
@@ -680,11 +706,11 @@ func checkHudProjectionCountsAreIndependent() throws {
     let store = makeStore(in: temporaryDirectory)
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
     for index in 0..<2 {
-        let doing = try require(try store.add(title: "进行中\(index)"), "expected doing task")
+        let doing = try require(try store.add(title: "进行中\(index)", group: "默认"), "expected doing task")
         _ = try store.setStatus(doing.id, status: .doing, at: now)
     }
     for index in 0..<5 {
-        _ = try store.add(title: "待办\(index)")
+        _ = try store.add(title: "待办\(index)", group: "默认")
     }
 
     // 上限设为 1：渲染集合被截断，但分区计数仍反映显示范围内的完整数量。
@@ -705,10 +731,10 @@ func checkSortsOpenItemsByPriorityThenDueDate() throws {
     let store = makeStore(in: temporaryDirectory)
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
 
-    _ = try store.add(title: "中-明天", priority: .medium, dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 9, minute: 0))
-    _ = try store.add(title: "高-无截止", priority: .high)
-    _ = try store.add(title: "低-今天", priority: .low, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0))
-    _ = try store.add(title: "高-今天", priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0))
+    _ = try store.add(title: "中-明天", group: "默认", priority: .medium, dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 9, minute: 0))
+    _ = try store.add(title: "高-无截止", group: "默认", priority: .high)
+    _ = try store.add(title: "低-今天", group: "默认", priority: .low, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0))
+    _ = try store.add(title: "高-今天", group: "默认", priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0))
 
     let titles = store.openItems(now: now).map(\.title)
     try check(
@@ -723,8 +749,8 @@ func checkSortsOverdueItemsToBottom() throws {
     let store = makeStore(in: temporaryDirectory)
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
 
-    _ = try store.add(title: "高-已过期", priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 14, hour: 10, minute: 0))
-    _ = try store.add(title: "低-未过期", priority: .low, dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 9, minute: 0))
+    _ = try store.add(title: "高-已过期", group: "默认", priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 14, hour: 10, minute: 0))
+    _ = try store.add(title: "低-未过期", group: "默认", priority: .low, dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 9, minute: 0))
 
     let titles = store.openItems(now: now).map(\.title)
     try check(titles == ["低-未过期", "高-已过期"], "过期任务应全局沉底，实际: \(titles)")
@@ -736,8 +762,8 @@ func checkSortsItemsWithoutDueDateLast() throws {
     let store = makeStore(in: temporaryDirectory)
     let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
 
-    _ = try store.add(title: "有截止", priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 20, hour: 9, minute: 0))
-    _ = try store.add(title: "无截止", priority: .high)
+    _ = try store.add(title: "有截止", group: "默认", priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 20, hour: 9, minute: 0))
+    _ = try store.add(title: "无截止", group: "默认", priority: .high)
 
     let titles = store.openItems(now: now).map(\.title)
     try check(titles == ["有截止", "无截止"], "同优先级无截止日期应排后，实际: \(titles)")
@@ -747,11 +773,11 @@ func checkLoadReflectsExternalChange() throws {
     let temporaryDirectory = try makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
     let store = makeStore(in: temporaryDirectory)
-    _ = try require(try store.add(title: "初始任务"), "expected todo")
+    _ = try require(try store.add(title: "初始任务", group: "默认"), "expected todo")
 
     let external = makeStore(in: temporaryDirectory)
     try external.load()
-    _ = try require(try external.add(title: "外部任务"), "expected external todo")
+    _ = try require(try external.add(title: "外部任务", group: "默认"), "expected external todo")
 
     try store.load()
     try check(store.items.map(\.title) == ["外部任务", "初始任务"], "load should reflect external change")
@@ -761,7 +787,7 @@ func checkLoadSkipsPublishWhenUnchanged() throws {
     let temporaryDirectory = try makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
     let store = makeStore(in: temporaryDirectory)
-    _ = try require(try store.add(title: "任务"), "expected todo")
+    _ = try require(try store.add(title: "任务", group: "默认"), "expected todo")
 
     var publishCount = 0
     let cancellable = store.objectWillChange.sink { publishCount += 1 }
@@ -776,7 +802,7 @@ func checkLoadClearsItemsWhenFileMissing() throws {
     let temporaryDirectory = try makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
     let store = makeStore(in: temporaryDirectory)
-    _ = try require(try store.add(title: "任务"), "expected todo")
+    _ = try require(try store.add(title: "任务", group: "默认"), "expected todo")
 
     try FileManager.default.removeItem(at: temporaryDirectory.appendingPathComponent("todos.json"))
 
@@ -784,8 +810,241 @@ func checkLoadClearsItemsWhenFileMissing() throws {
     try check(store.items.isEmpty, "load should clear items when file missing")
 }
 
+func checkSequentialIDsAcrossGroups() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = makeStore(in: directory)
+    let first = try require(try store.add(title: "默认任务", group: "默认"), "应创建任务")
+    let second = try require(try store.add(title: "项目任务", group: "项目"), "应创建任务")
+    try check([first.id, second.id] == [10000, 10001], "各组必须共享编号")
+    try store.delete(second.id)
+    let reloaded = makeStore(in: directory)
+    let third = try require(try reloaded.add(title: "继续编号", group: "默认"), "应创建任务")
+    try check(third.id == 10002, "删除最大 ID 后不得复用")
+    try reloaded.delete(first.id)
+    try reloaded.delete(third.id)
+    let fourth = try require(try makeStore(in: directory).add(title: "清空后新增", group: "默认"), "应创建任务")
+    try check(fourth.id == 10003, "清空任务后仍须继续编号")
+}
+
+func checkGroupAndStaleWrites() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let stale = makeStore(in: directory)
+    let task = try require(try stale.add(title: "原任务", group: "默认"), "应创建任务")
+    let external = makeStore(in: directory)
+    _ = try external.update(task.id, title: "外部标题", group: "  完整项目名称  ")
+    let added = try require(try external.add(title: "外部新增", group: "另一组"), "应创建任务")
+    _ = try stale.setStatus(task.id, status: .doing)
+    try stale.markTimedReminderSent(task.id)
+    let loaded = try require(stale.items.first { $0.id == task.id }, "应保留目标任务")
+    try check(loaded.title == "外部标题" && loaded.group == "完整项目名称", "旧快照不能覆盖标题和组别")
+    try check(stale.items.contains { $0.id == added.id }, "旧快照不能覆盖外部新增")
+    try check(loaded.reminderSentAt != nil && loaded.status == .doing, "状态和提醒回写应保留")
+    _ = try external.advanceStatus(task.id)
+    _ = try stale.advanceStatus(task.id)
+    try check(stale.items.first { $0.id == task.id }?.status == .done, "状态推进必须以最新文档为准，不重开已完成任务")
+    try external.delete(task.id)
+    try check(try stale.setStatus(task.id, status: .done) == nil, "不得恢复已删除任务")
+    let before = try Data(contentsOf: directory.appendingPathComponent("todos.json"))
+    do {
+        _ = try stale.add(title: "无效组", group: " \n ")
+        throw CheckFailure(message: "空组名应失败")
+    } catch is CheckFailure {
+        throw CheckFailure(message: "空组名未被拒绝")
+    } catch {
+        try check(try Data(contentsOf: directory.appendingPathComponent("todos.json")) == before, "无效输入不能改文件")
+    }
+}
+
+func checkLegacyGroupAndIDMigration() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("todos.json")
+    let data = Data("""
+    [
+      {"id":"00000000-0000-0000-0000-000000000002","title":"较晚","createdAt":"2026-06-20T02:00:00Z","status":"doing","priority":"high","description":"保留描述"},
+      {"id":"00000000-0000-0000-0000-000000000003","title":"同日完成","createdAt":"2026-06-19T02:00:00Z","completedAt":"2026-06-20T02:00:00Z"},
+      {"id":"00000000-0000-0000-0000-000000000001","title":"同日待办","createdAt":"2026-06-19T02:00:00Z","reminderAt":"2026-06-21T02:00:00Z"}
+    ]
+    """.utf8)
+    try data.write(to: file)
+    let store = makeStore(in: directory)
+    try check(try store.setStatus(99999, status: .done) == nil, "不存在的目标应失败")
+    try check(try Data(contentsOf: file) == data, "失败操作不得先迁移")
+    try check(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("todos.v1.backup.json").path), "失败操作不得先备份")
+    try store.load()
+    try check(store.items.allSatisfy { $0.group == "默认" }, "全部历史任务必须迁入默认组")
+    try check(store.items.first { $0.title == "同日待办" }?.id == 10000, "同时间应按 UUID 稳定编号")
+    try check(store.items.first { $0.title == "同日完成" }?.id == 10001, "已完成任务也应编号")
+    try check(store.items.first { $0.title == "同日完成" }?.status == .done, "应兼容缺失 status")
+    try check(store.items.first { $0.title == "较晚" }?.description == "保留描述", "业务字段不得丢失")
+    try check(try Data(contentsOf: directory.appendingPathComponent("todos.v1.backup.json")) == data, "备份必须逐字节一致")
+    let migrated = try Data(contentsOf: file)
+    try store.load()
+    try check(try Data(contentsOf: file) == migrated, "重复加载不得重新编号")
+    let added = try require(try store.add(title: "迁移后新增", group: "项目"), "应新增")
+    try check(added.id == 10003, "迁移后应接续编号")
+}
+
+func checkInvalidDocumentsAndBackupConflict() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("todos.json")
+    let store = makeStore(in: directory)
+    _ = try store.add(title: "有效任务", group: "默认")
+    let valid = try Data(contentsOf: file)
+    let object = try require(try JSONSerialization.jsonObject(with: valid) as? [String: Any], "应为文档对象")
+    var invalidDocuments = [
+        ["schemaVersion": 999, "nextID": 10001, "items": object["items"]!] as [String: Any],
+        ["schemaVersion": 2, "nextID": 10000, "items": object["items"]!] as [String: Any]
+    ]
+    let originalItems = try require(object["items"] as? [[String: Any]], "应包含任务数组")
+    for (key, value) in [("group", "" as Any), ("group", " 前导空格" as Any), ("id", 9999 as Any), ("id", 10000.5 as Any)] {
+        var item = originalItems[0]
+        item[key] = value
+        invalidDocuments.append(["schemaVersion": 2, "nextID": 10001, "items": [item]])
+    }
+    invalidDocuments.append(["schemaVersion": 2, "nextID": 10001, "items": originalItems + originalItems])
+    for invalid in invalidDocuments {
+        let corrupt = try JSONSerialization.data(withJSONObject: invalid)
+        try corrupt.write(to: file)
+        do {
+            try store.load()
+            throw CheckFailure(message: "无效文档必须失败")
+        } catch is CheckFailure {
+            throw CheckFailure(message: "无效文档未被拒绝")
+        } catch {
+            try check(store.items.count == 1, "失败加载应保留有效快照")
+            try check(try Data(contentsOf: file) == corrupt, "不得重置无效文档")
+        }
+    }
+    let legacy = Data("[]".utf8)
+    try legacy.write(to: file)
+    try Data("旧备份".utf8).write(to: directory.appendingPathComponent("todos.v1.backup.json"))
+    do {
+        try store.load()
+        throw CheckFailure(message: "备份冲突必须失败")
+    } catch is CheckFailure {
+        throw CheckFailure(message: "备份冲突未被拒绝")
+    } catch {
+        try check(try Data(contentsOf: file) == legacy, "冲突不能覆盖旧任务")
+    }
+}
+
 func makeStore(in temporaryDirectory: URL) -> TodoStore {
     TodoStore(fileURL: temporaryDirectory.appendingPathComponent("todos.json"))
+}
+
+func checkSharedGroupFixtures() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("windows-native/tests/fixtures")
+    let legacy = try Data(contentsOf: fixtures.appendingPathComponent("tasks-groups-legacy.json"))
+    try legacy.write(to: directory.appendingPathComponent("todos.json"))
+    let expected = try JSONFile.load(TaskDocument.self, from: fixtures.appendingPathComponent("tasks-groups-v2.json"))
+    let store = makeStore(in: directory)
+    try store.load()
+    let actual = try JSONFile.load(TaskDocument.self, from: directory.appendingPathComponent("todos.json"))
+    try check(actual == expected, "Swift 迁移应符合共享夹具的全部字段和稳定映射")
+    let encoded = try JSONEncoder.ghostPin.encode(actual)
+    try check(try JSONDecoder.ghostPin.decode(TaskDocument.self, from: encoded) == expected, "新文档应可往返编码")
+    let payload = try JSONSerialization.jsonObject(with: JSONEncoder.ghostPin.encode(TodoItemPayload(actual.items[0]))) as? [String: Any]
+    try check(payload?["id"] as? Int == 10000 && payload?["group"] as? String == "默认", "CLI payload 必须包含数字 ID 和完整组别")
+    let docs = fixtures.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("docs/task-storage.md")
+    let example = try String(contentsOf: docs, encoding: .utf8).components(separatedBy: "```json\n")[1].components(separatedBy: "```\n")[0]
+    try JSONDecoder.ghostPin.decode(TaskDocument.self, from: Data(example.utf8)).validate()
+}
+
+func checkConcurrentProcesses() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let workers = try (1...2).map { index in
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+        process.arguments = ["--storage-worker", directory.path, "任务\(index)"]
+        try process.run()
+        return process
+    }
+    defer { workers.filter(\.isRunning).forEach { $0.terminate() } }
+    let deadline = Date().addingTimeInterval(5)
+    while try FileManager.default.contentsOfDirectory(atPath: directory.path).filter({ $0.hasPrefix("ready-") }).count < 2 {
+        guard Date() < deadline else { throw CheckFailure(message: "工作进程未就绪") }
+        Thread.sleep(forTimeInterval: 0.01)
+    }
+    try Data().write(to: directory.appendingPathComponent("go"))
+    for worker in workers {
+        worker.waitUntilExit()
+        try check(worker.terminationStatus == 0, "并发进程应成功退出")
+    }
+    let store = makeStore(in: directory)
+    try store.load()
+    try check(store.items.map(\.id).sorted() == [10000, 10001], "并发写入不得丢失任务或重复 ID")
+}
+
+final class CommitFailingFileManager: FileManager, @unchecked Sendable {
+    private var directoryCalls = 0
+
+    override func createDirectory(at url: URL, withIntermediateDirectories createIntermediates: Bool, attributes: [FileAttributeKey: Any]? = nil) throws {
+        directoryCalls += 1
+        if directoryCalls == 2 { throw CocoaError(.fileWriteNoPermission) }
+        try super.createDirectory(at: url, withIntermediateDirectories: createIntermediates, attributes: attributes)
+    }
+}
+
+func checkFailedCommitAndRetry() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("todos.json")
+    let legacy = Data("[]".utf8)
+    try legacy.write(to: file)
+    let failing = TodoStore(fileURL: file, fileManager: CommitFailingFileManager())
+    var published = 0
+    let subscription = failing.objectWillChange.sink { published += 1 }
+    do {
+        _ = try failing.add(title: "失败任务", group: "默认")
+        throw CheckFailure(message: "模拟提交应失败")
+    } catch is CheckFailure {
+        throw CheckFailure(message: "模拟提交未失败")
+    } catch {
+        try check(failing.items.isEmpty && published == 0, "提交失败不得发布内存状态")
+        try check(try Data(contentsOf: file) == legacy, "提交失败应保留原始任务")
+        try check(try Data(contentsOf: directory.appendingPathComponent("todos.v1.backup.json")) == legacy, "提交前原始备份已完成")
+    }
+    withExtendedLifetime(subscription) {}
+    let retry = makeStore(in: directory)
+    let added = try require(try retry.add(title: "重试任务", group: "默认"), "重试应成功")
+    try check(added.id == 10000, "失败不得消耗编号，空数组可重复迁移")
+    let before = try Data(contentsOf: file)
+    let failingUpdate = TodoStore(fileURL: file, fileManager: CommitFailingFileManager(), initialItems: retry.items)
+    do {
+        _ = try failingUpdate.add(title: "再次失败", group: "项目")
+        throw CheckFailure(message: "模拟提交应失败")
+    } catch is CheckFailure {
+        throw CheckFailure(message: "模拟提交未失败")
+    } catch {
+        try check(try Data(contentsOf: file) == before, "新格式提交失败应保留计数器")
+        try check(failingUpdate.items == retry.items, "新格式提交失败应保留快照")
+    }
+}
+
+func checkGroupedHudProjection() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = makeStore(in: directory)
+    let now = makeDate(year: 2026, month: 6, day: 20, hour: 12, minute: 0)
+    let doing = try require(try store.add(title: "进行中", group: "项目甲", createdAt: now, priority: .low), "应创建")
+    _ = try store.advanceStatus(doing.id)
+    _ = try store.add(title: "高优先级", group: "项目乙", createdAt: now, priority: .high)
+    _ = try store.add(title: "旧任务", group: "默认", createdAt: now.addingTimeInterval(-86400))
+    let focused = store.hudProjection(scope: .all, maxCount: 1, focusDoing: true, now: now, calendar: checkCalendar)
+    try check(focused.doing.map(\.group) == ["项目甲"] && focused.todoCount == 2, "聚焦和计数应跨组执行")
+    let today = store.hudProjection(scope: .today, maxCount: 10, focusDoing: false, now: now, calendar: checkCalendar)
+    try check(today.doing.count == 1 && today.todo.map(\.group) == ["项目乙"], "日期范围和分区不应按组分裂")
+    try check(try store.listItems(group: "项目乙").map(\.title) == ["高优先级"], "组别查询应精确过滤")
+    try check(try store.listItems(group: "不存在").isEmpty, "未知组应返回空列表")
 }
 
 func makeTemporaryDirectory() throws -> URL {
@@ -795,8 +1054,8 @@ func makeTemporaryDirectory() throws -> URL {
     return url
 }
 
-func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
-    if !condition() {
+func check(_ condition: @autoclosure () throws -> Bool, _ message: String) throws {
+    if try !condition() {
         throw CheckFailure(message: message)
     }
 }

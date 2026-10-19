@@ -5,7 +5,7 @@ Windows 版 GhostPin 位于 `windows-native/`，使用 Rust、`windows-rs`、Win
 ## 工具链
 
 - Windows 11 x64
-- Rust MSVC 工具链
+- Rust 1.89 或更新的 MSVC 工具链
 - Visual Studio Build Tools（MSVC 链接器与 Windows SDK，仅源码构建需要）
 
 运行发布的原生 EXE 不需要安装 .NET、Visual C++ Redistributable 或额外 DLL。
@@ -44,7 +44,9 @@ windows-native\test.cmd
 - 任务真源：`%LOCALAPPDATA%\GhostPin\todos.json`
 - 原生 HUD 设置：`%LOCALAPPDATA%\GhostPin\native-settings.json`
 
-任务文件不存在时显示空状态；文件暂时损坏时保留最后一次成功快照并记录诊断，不会覆盖源文件。状态推进通过同目录临时文件和原子替换写回。
+任务文档使用 `schemaVersion: 2`、`nextID` 和 `items`，任务具有从 `10000` 开始的整数 ID 和必填组别。旧 UUID 数组首次成功读取时全部迁入 `默认`，原始字节保存在 `todos.v1.backup.json`。格式、备份与回退规则见[任务存储与升级](task-storage.md)。
+
+任务文件不存在时显示空状态；文件暂时损坏时保留最后一次成功快照并记录诊断，不会覆盖源文件。状态推进在固定 `.todos.lock` 内重读最新文档，再通过同目录临时文件和原子替换写回，保留完整组名、其他任务和下一编号。
 
 ## HUD 操作
 
@@ -52,6 +54,7 @@ windows-native\test.cmd
 - 通知区域菜单提供显示/隐藏、交互模式、设置和退出。
 - 设置窗口包含 HUD 与高级两页，支持透明度、范围、条数上限、置顶和可选全局快捷键。
 - HUD 只显示 Todo/Doing，圆形按钮执行 `Todo → Doing → Done`；同一任务成功推进后的 500ms 内重复点击会被忽略。
+- 标题行右侧依次显示优先级和组别，两者整体右对齐。组名按同字体三个汉字的文本宽度限制，单行尾部省略；`默认` 也显示标记，完整组名不会截断保存。所有组仍在统一列表中展示。
 
 ## 人工验收
 

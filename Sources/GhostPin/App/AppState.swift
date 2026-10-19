@@ -39,17 +39,22 @@ final class AppState: ObservableObject {
             .appendingPathComponent("GhostPin", isDirectory: true)
 
         let resolvedTodosURL: URL
+        let legacyTodosURL: URL?
         let storageResolutionError: Error?
         do {
-            resolvedTodosURL = try StorageLocations.todosURL(fileManager: fileManager)
+            let currentURL = try StorageLocations.todosURL(fileManager: fileManager)
+            let legacyURL = try StorageLocations.legacyTodosURL(fileManager: fileManager)
+            resolvedTodosURL = currentURL
+            legacyTodosURL = legacyURL
             storageResolutionError = nil
         } catch {
             resolvedTodosURL = fallbackDirectory.appendingPathComponent("todos.json")
+            legacyTodosURL = nil
             storageResolutionError = error
         }
 
         self.todosURL = resolvedTodosURL
-        self.todoStore = TodoStore(fileURL: resolvedTodosURL, fileManager: fileManager)
+        self.todoStore = TodoStore(fileURL: resolvedTodosURL, legacyFileURL: legacyTodosURL, fileManager: fileManager)
         self.preferences = AppPreferences()
         self.hotKeySetupState = preferences.hudModeHotKeyEnabled ? .pendingConfiguration : .disabled
 
@@ -139,25 +144,8 @@ final class AppState: ObservableObject {
             return
         }
 
-        guard let current = todoStore.items.first(where: { $0.id == item.id }) else {
-            return
-        }
-        let nextStatus: TodoStatus?
-        switch current.status {
-        case .todo:
-            nextStatus = .doing
-        case .doing:
-            nextStatus = .done
-        case .done:
-            nextStatus = nil
-        }
-        guard let nextStatus else {
-            return
-        }
-
         do {
-            guard let updated = try todoStore.setStatus(item.id, status: nextStatus),
-                  updated.status == nextStatus else {
+            guard try todoStore.advanceStatus(item.id) != nil else {
                 return
             }
             statusClickTimes[item.id] = now

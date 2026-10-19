@@ -14,7 +14,7 @@ final class NotificationService {
         content.sound = nil
 
         let request = UNNotificationRequest(
-            identifier: "ghostpin.timed.\(item.id.uuidString).\(Date().timeIntervalSince1970)",
+            identifier: "ghostpin.timed.\(item.id).\(Date().timeIntervalSince1970)",
             content: content,
             trigger: nil
         )

@@ -162,6 +162,20 @@ CLI SHALL 校验参数：无效或不存在的整数 id、非法 ISO8601 提醒�
 - **WHEN** 用户将 UUID、负数、小数或小于 `10000` 的值作为任务 id
 - **THEN** 输出数字 ID 要求的错误说明，退出码非零，任务数据不变
 
+### Requirement: 独立运行
+
+CLI SHALL 可在 App 未运行时独立工作，直接读写 `todos.json`；与 App 共用 `~/Library/Application Support/GhostPin/todos.json` 及相同数据格式，并遵守产品身份规格定义的旧数据迁移行为。独立新增同样 MUST 显式指定非空组别。
+
+#### Scenario: App 未运行时操作
+
+- **WHEN** GhostPin App 未运行且用户执行 `ghostpin-cli add "任务" --group 默认`
+- **THEN** 任务写入 `~/Library/Application Support/GhostPin/todos.json`，组别为 `默认`，App 下次启动时可见
+
+#### Scenario: CLI 首次触发旧数据迁移
+
+- **WHEN** App 未运行、新任务文件不存在且旧 TodoPin 任务文件存在时，用户首次执行 `ghostpin-cli list`
+- **THEN** CLI 迁移旧数据后从 GhostPin 任务文件返回原有任务，任务具有稳定整数 ID 和 `默认` 组别，旧源文件保持不变
+
 ### Requirement: 命令级帮助
 
 `ghostpin-cli` 根命令以及 `list`、`add`、`doing`、`done`、`undone`、`update`、`delete`、`version` 命令 MUST 同时支持 `-h` 与 `--help`；帮助请求 SHALL 在业务参数校验和任务存储访问前处理，输出对应命令的用法、位置参数和可用选项，以退出码 0 结束且不得修改任务数据。新增帮助 MUST 明示 `--group` 必填，列表和修改帮助 MUST 说明组别选项，ID 帮助 MUST 说明使用从 `10000` 开始的整数。

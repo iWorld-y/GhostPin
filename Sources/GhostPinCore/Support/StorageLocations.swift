@@ -26,23 +26,7 @@ public enum StorageLocations {
             fileManager: fileManager,
             applicationSupportRoot: applicationSupportRoot
         )
-        let todosURL = directory.appendingPathComponent("todos.json")
-        let legacyURL = try legacyTodosURL(
-            fileManager: fileManager,
-            applicationSupportRoot: applicationSupportRoot
-        )
-
-        guard !fileManager.fileExists(atPath: todosURL.path),
-              fileManager.fileExists(atPath: legacyURL.path) else {
-            return todosURL
-        }
-
-        try migrateLegacyTodos(
-            from: legacyURL,
-            to: todosURL,
-            fileManager: fileManager
-        )
-        return todosURL
+        return directory.appendingPathComponent("todos.json")
     }
 
     public static func legacyTodosURL(
@@ -62,12 +46,20 @@ public enum StorageLocations {
         fileManager: FileManager,
         applicationSupportRoot: URL?
     ) throws -> URL {
-        if let applicationSupportRoot {
+        var root: URL? = applicationSupportRoot
+        #if DEBUG
+        if root == nil,
+           let path = ProcessInfo.processInfo.environment["GHOSTPIN_TEST_SUPPORT_ROOT"],
+           !path.isEmpty {
+            root = URL(fileURLWithPath: path, isDirectory: true)
+        }
+        #endif
+        if let root {
             try fileManager.createDirectory(
-                at: applicationSupportRoot,
+                at: root,
                 withIntermediateDirectories: true
             )
-            return applicationSupportRoot
+            return root
         }
         return try fileManager.url(
             for: .applicationSupportDirectory,
@@ -77,30 +69,4 @@ public enum StorageLocations {
         )
     }
 
-    private static func migrateLegacyTodos(
-        from legacyURL: URL,
-        to todosURL: URL,
-        fileManager: FileManager
-    ) throws {
-        let data = try Data(contentsOf: legacyURL)
-        _ = try JSONDecoder.ghostPin.decode([TodoItem].self, from: data)
-
-        let temporaryURL = todosURL
-            .deletingLastPathComponent()
-            .appendingPathComponent(".todos-\(UUID().uuidString).tmp")
-        defer { try? fileManager.removeItem(at: temporaryURL) }
-
-        try data.write(to: temporaryURL, options: [.atomic])
-        guard !fileManager.fileExists(atPath: todosURL.path) else {
-            return
-        }
-
-        do {
-            try fileManager.moveItem(at: temporaryURL, to: todosURL)
-        } catch {
-            if !fileManager.fileExists(atPath: todosURL.path) {
-                throw error
-            }
-        }
-    }
 }

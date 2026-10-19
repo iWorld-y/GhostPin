@@ -278,22 +278,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         window.sync(&settings);
                     }
                 }
-                PlatformEvent::Advance(id) if !id.is_empty() => {
-                    match repository.load_for_update() {
-                        Ok(_) => {
-                            let mut items = repository.snapshot().to_vec();
-                            if advance
-                                .advance_by_id(&mut items, &id, SystemTime::now())
-                                .is_some()
-                            {
-                                if let Err(error) = repository.replace(&items) {
-                                    record_runtime_error("storage", &error);
-                                } else {
-                                    own_write_snapshot = Some(repository.snapshot().to_vec());
-                                    redraw_safe(&mut surface, &hud, &repository, &settings);
-                                }
-                            }
+                PlatformEvent::Advance(id) => {
+                    match repository.advance_status(id, &mut advance, SystemTime::now()) {
+                        Ok(true) => {
+                            own_write_snapshot = Some(repository.snapshot().to_vec());
+                            redraw_safe(&mut surface, &hud, &repository, &settings);
                         }
+                        Ok(false) => {}
                         Err(error) => record_runtime_error("storage", &error),
                     }
                 }

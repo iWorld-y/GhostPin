@@ -10,7 +10,10 @@ use windows::{
     core::{Error as WindowsError, HSTRING, Param},
 };
 
-use crate::core::{self, HudMode, HudScope, HudSettings, Priority, Status, Todo};
+use crate::core::{
+    self, FIRST_TASK_ID, HudMode, HudScope, HudSettings, MAX_TASK_ID, Priority, Status,
+    TaskDocument, Todo,
+};
 
 #[derive(Debug)]
 pub enum CodecError {
@@ -307,12 +310,48 @@ fn optional_time(object: &JsonObject, name: &str) -> Result<Option<SystemTime>> 
         .transpose()
 }
 
-pub fn decode_todos(utf8_json: &str) -> Result<Vec<Todo>> {
-    let array = JsonArray::Parse(&HSTRING::from(utf8_json)).map_err(CodecError::from)?;
+fn required_integer(object: &JsonObject, name: &str) -> Result<u64> {
+    let value = object.Lookup(&key(name)).map_err(CodecError::from)?;
+    if value_type(&value)? != JsonValueType::Number {
+        return Err(invalid(format!("JSON field {name} is not a number")));
+    }
+    let number = value.GetNumber().map_err(CodecError::from)?;
+    if !number.is_finite()
+        || number < 0.0
+        || number.fract() != 0.0
+        || number > (MAX_TASK_ID + 1) as f64
+    {
+        return Err(invalid(format!("JSON field {name} is not a valid integer")));
+    }
+    Ok(number as u64)
+}
+
+/// 返回文档及是否由旧 UUID 数组迁移；备份和提交由仓库在锁内完成。
+pub fn decode_document(utf8_json: &str) -> Result<(TaskDocument, bool)> {
+    let root = JsonValue::Parse(&HSTRING::from(utf8_json)).map_err(CodecError::from)?;
+    let legacy = root.ValueType().map_err(CodecError::from)? == JsonValueType::Array;
+    let (array, next_id) = if legacy {
+        (root.GetArray().map_err(CodecError::from)?, FIRST_TASK_ID)
+    } else {
+        let object = root.GetObject().map_err(CodecError::from)?;
+        if required_integer(&object, "schemaVersion")? != 2 {
+            return Err(invalid("不支持的任务存储版本"));
+        }
+        let array = object
+            .Lookup(&key("items"))
+            .map_err(CodecError::from)?
+            .GetArray()
+            .map_err(CodecError::from)?;
+        (array, required_integer(&object, "nextID")?)
+    };
     let size = array.Size().map_err(CodecError::from)?;
     let mut result = Vec::with_capacity(size as usize);
+    let mut legacy_ids = Vec::with_capacity(size as usize);
     for index in 0..size {
         let object = array.GetObjectAt(index).map_err(CodecError::from)?;
+        if legacy {
+            legacy_ids.push(normalize_uuid(&required_string(&object, "id")?)?);
+        }
         let completed_at = optional_time(&object, "completedAt")?;
         let status = if !object.HasKey(&key("status")).map_err(CodecError::from)? {
             completed_at.map(|_| Status::Done).unwrap_or(Status::Todo)
@@ -345,7 +384,16 @@ pub fn decode_todos(utf8_json: &str) -> Result<Vec<Todo>> {
             }
         };
         result.push(Todo {
-            id: normalize_uuid(&required_string(&object, "id")?)?,
+            id: if legacy {
+                FIRST_TASK_ID + index as u64
+            } else {
+                required_integer(&object, "id")?
+            },
+            group: if legacy {
+                "默认".into()
+            } else {
+                required_string(&object, "group")?
+            },
             title: required_string(&object, "title")?,
             created_at: parse_iso8601(&required_string(&object, "createdAt")?)?,
             status,
@@ -357,7 +405,41 @@ pub fn decode_todos(utf8_json: &str) -> Result<Vec<Todo>> {
             description: nullable_string(&object, "description")?,
         });
     }
-    Ok(result)
+    let next_id = if legacy {
+        if legacy_ids
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            != result.len()
+        {
+            return Err(invalid("旧任务 UUID 重复"));
+        }
+        let mut ordered: Vec<_> = legacy_ids.into_iter().zip(result).collect();
+        ordered.sort_by(|left, right| {
+            left.1
+                .created_at
+                .cmp(&right.1.created_at)
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        result = ordered
+            .into_iter()
+            .enumerate()
+            .map(|(index, (_, mut item))| {
+                item.id = FIRST_TASK_ID + index as u64;
+                item
+            })
+            .collect();
+        FIRST_TASK_ID + result.len() as u64
+    } else {
+        next_id
+    };
+    let document = TaskDocument {
+        schema_version: 2,
+        next_id,
+        items: result,
+    };
+    document.validate().map_err(invalid)?;
+    Ok((document, legacy))
 }
 
 fn status_name(status: Status) -> &'static str {
@@ -409,12 +491,13 @@ fn insert_nullable_date(object: &JsonObject, name: &str, value: Option<SystemTim
         None => insert_null(object, name),
     }
 }
-pub fn encode_todos(items: &[Todo]) -> Result<String> {
+pub fn encode_document(document: &TaskDocument) -> Result<String> {
+    document.validate().map_err(invalid)?;
     let array = JsonArray::new().map_err(CodecError::from)?;
-    for item in items {
+    for item in &document.items {
         let object = JsonObject::new().map_err(CodecError::from)?;
-        let id = normalize_uuid(&item.id)?;
-        insert_string(&object, "id", &id)?;
+        insert_number(&object, "id", item.id as f64)?;
+        insert_string(&object, "group", &item.group)?;
         insert_string(&object, "title", &item.title)?;
         insert_date(&object, "createdAt", item.created_at)?;
         insert_string(&object, "status", status_name(item.status))?;
@@ -429,7 +512,15 @@ pub fn encode_todos(items: &[Todo]) -> Result<String> {
         }
         array.Append(&object).map_err(CodecError::from)?;
     }
-    Ok(array
+    let document_object = JsonObject::new().map_err(CodecError::from)?;
+    insert_number(
+        &document_object,
+        "schemaVersion",
+        document.schema_version as f64,
+    )?;
+    insert_number(&document_object, "nextID", document.next_id as f64)?;
+    insert(&document_object, "items", &array)?;
+    Ok(document_object
         .Stringify()
         .map_err(CodecError::from)?
         .to_string_lossy())
@@ -670,12 +761,56 @@ pub fn encode_settings(raw: &HudSettings) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_group_fixtures_have_the_same_stable_migration() {
+        std::thread::spawn(|| {
+            let _apartment = RuntimeApartment::new().expect("WinRT apartment");
+            let (migrated, legacy) =
+                decode_document(include_str!("../tests/fixtures/tasks-groups-legacy.json"))
+                    .expect("legacy");
+            let (expected, new_format) =
+                decode_document(include_str!("../tests/fixtures/tasks-groups-v2.json"))
+                    .expect("v2");
+            assert!(legacy && !new_format);
+            assert_eq!(migrated, expected);
+            assert_eq!(
+                decode_document(&encode_document(&migrated).expect("encode"))
+                    .expect("round trip")
+                    .0,
+                expected
+            );
+            assert!(
+                decode_document(include_str!("../tests/fixtures/tasks-cross-language.json"))
+                    .is_ok()
+            );
+            assert!(
+                decode_document(include_str!(
+                    "../tests/fixtures/tasks-legacy-missing-status.json"
+                ))
+                .is_ok()
+            );
+            let source = include_str!("../tests/fixtures/tasks-groups-v2.json");
+            for invalid in [
+                source.replace("\"schemaVersion\": 2", "\"schemaVersion\": 999"),
+                source.replace("\"nextID\": 10003", "\"nextID\": 10000"),
+                source.replace("\"group\": \"默认\"", "\"group\": \"\""),
+                source.replace("\"id\": 10001", "\"id\": 10000"),
+                source.replace("\"id\": 10001", "\"id\": 10000.5"),
+            ] {
+                assert!(decode_document(&invalid).is_err());
+            }
+        })
+        .join()
+        .expect("WinRT fixture test thread");
+    }
     #[test]
     fn round_trip_todo_uses_windows_json() {
         std::thread::spawn(|| {
             let _apartment = RuntimeApartment::new().expect("WinRT apartment");
             let item = Todo {
-                id: "123e4567-e89b-12d3-a456-426614174000".into(),
+                id: 10000,
+                group: "默认".into(),
                 title: "测试".into(),
                 created_at: UNIX_EPOCH,
                 status: Status::Todo,
@@ -686,8 +821,16 @@ mod tests {
                 due_at: None,
                 description: Some("描述".into()),
             };
-            let encoded = encode_todos(std::slice::from_ref(&item)).expect("encode");
-            assert_eq!(decode_todos(&encoded).expect("decode"), vec![item]);
+            let encoded = encode_document(&TaskDocument {
+                next_id: 10002,
+                items: vec![item.clone()],
+                ..TaskDocument::default()
+            })
+            .expect("encode");
+            assert_eq!(
+                decode_document(&encoded).expect("decode").0.items,
+                vec![item]
+            );
         })
         .join()
         .expect("WinRT test thread");
@@ -698,7 +841,8 @@ mod tests {
         std::thread::spawn(|| {
             let outer = RuntimeApartment::new().expect("outer WinRT apartment");
             let item = Todo {
-                id: "123e4567-e89b-12d3-a456-426614174001".into(),
+                id: 10001,
+                group: "项目".into(),
                 title: "嵌套 apartment".into(),
                 created_at: UNIX_EPOCH,
                 status: Status::Todo,
@@ -709,15 +853,23 @@ mod tests {
                 due_at: None,
                 description: None,
             };
-            let encoded = encode_todos(std::slice::from_ref(&item)).expect("encode");
+            let encoded = encode_document(&TaskDocument {
+                next_id: 10002,
+                items: vec![item.clone()],
+                ..TaskDocument::default()
+            })
+            .expect("encode");
             {
                 let _inner = RuntimeApartment::new().expect("inner WinRT apartment");
                 assert_eq!(
-                    decode_todos(&encoded).expect("inner decode"),
+                    decode_document(&encoded).expect("inner decode").0.items,
                     vec![item.clone()]
                 );
             }
-            assert_eq!(decode_todos(&encoded).expect("outer decode"), vec![item]);
+            assert_eq!(
+                decode_document(&encoded).expect("outer decode").0.items,
+                vec![item]
+            );
             drop(outer);
         })
         .join()

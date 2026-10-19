@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "nextID": 10003,
+  "items": [
+    {
+      "id": 10000,
+      "group": "默认",
+      "title": "同日待办任务",
+      "createdAt": "2026-06-19T02:00:00Z",
+      "status": "todo",
+      "reminderAt": "2026-06-21T02:00:00Z",
+      "reminderSentAt": "2026-06-21T02:01:00Z",
+      "priority": "low"
+    },
+    {
+      "id": 10001,
+      "group": "默认",
+      "title": "同日已完成任务",
+      "createdAt": "2026-06-19T02:00:00Z",
+      "status": "done",
+      "completedAt": "2026-06-20T02:00:00Z",
+      "priority": "medium"
+    },
+    {
+      "id": 10002,
+      "group": "默认",
+      "title": "较晚的进行中任务",
+      "createdAt": "2026-06-20T02:00:00Z",
+      "status": "doing",
+      "priority": "high",
+      "dueAt": "2026-06-22T02:00:00Z",
+      "description": "完整描述"
+    }
+  ]
+}
