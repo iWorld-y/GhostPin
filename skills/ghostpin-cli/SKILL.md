@@ -1,6 +1,6 @@
 ---
 name: ghostpin-cli
-description: 通过已安装的 GhostPin 应用命令行查询和管理本地待办。Use when the user asks to list, search, create, start, complete, reopen, update, or delete GhostPin tasks.
+description: 通过已安装的 GhostPin 应用命令行安装或更新本 skill，以及查询和管理本地待办。Use when the user asks to install or update the GhostPin skill, or list, search, create, start, complete, reopen, update, or delete GhostPin tasks.
 ---
 
 # GhostPin CLI
@@ -21,11 +21,28 @@ description: 通过已安装的 GhostPin 应用命令行查询和管理本地待
 
 如果该文件不存在或不可执行，停止操作并提示用户将 GhostPin.app 安装到 `/Applications`。
 
+## 安装与更新 Skill
+
+用户要求安装或更新本 skill 时，执行：
+
+```bash
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli init --json
+```
+
+命令从当前应用的随包资源安装到 `~/.agents/skills/ghostpin-cli/`。缺少目录时自动创建；已有目录会整目录替换，移除旧版本多余文件和本地新增文件。
+
+安装路径是符号链接时，命令解析到最终真实目录，检查真实目录中的归属标记后执行替换，原链接保持不变。已有真实目录必须包含名为 `ghostpin-cli` 的普通文件；缺少标记或标记是目录、符号链接时，拒绝覆盖，不自动补标记认领目录。
+
+旧版目录缺少标记时，报告原因并停止。用户核实目录归属后，可以在真实目录手动加入名为 `ghostpin-cli` 的空普通文件，再要求重新初始化。断开的链接、链接循环、非目录目标和随包资源缺失均视为失败。
+
+成功时检查退出码为 0、`ok` 为 true，且 `path` 是最终真实安装目录的绝对路径。失败时检查非零退出码及 `error`，不要声称安装完成；若错误包含旧目录副本路径，保留该路径供恢复使用。
+
 ## 命令帮助
 
 每条命令都支持 `-h` 和 `--help`。需要确认参数时，先执行对应命令的帮助：
 
 ```bash
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli init --help
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli list --help
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli add --help
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli doing --help

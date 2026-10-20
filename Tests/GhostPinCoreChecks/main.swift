@@ -47,6 +47,15 @@ let checkCalendar: Calendar = {
 }()
 
 let checks: [Check] = [
+    ("Skill 首次安装和整目录覆盖保留其他 Skill", checkSkillInstallAndReplace),
+    ("Skill 来源不完整时拒绝修改目标", checkInvalidSkillSources),
+    ("Skill 解析链接和后续上级路径并保留链接文本", checkSkillSymbolicLinks),
+    ("Skill 拒绝无效目标和无归属标记目录", checkInvalidSkillTargets),
+    ("Skill 复制失败或副本不完整时保留旧目录", checkSkillCopyFailures),
+    ("Skill 提交前复核复制期间变化的目标归属", checkSkillTargetChanges),
+    ("Skill 提交失败恢复旧目录", checkSkillCommitFailure),
+    ("Skill 恢复失败保留旧副本并报告路径", checkSkillRestoreFailure),
+    ("Skill 提交后清理失败如实报告安装结果", checkSkillCleanupFailure),
     ("任务跨组递增编号且删除后不复用", checkSequentialIDsAcrossGroups),
     ("换组和旧快照写回保留最新字段", checkGroupAndStaleWrites),
     ("旧任务一次迁入默认组并稳定编号", checkLegacyGroupAndIDMigration),
@@ -1045,6 +1054,313 @@ func checkGroupedHudProjection() throws {
     try check(today.doing.count == 1 && today.todo.map(\.group) == ["项目乙"], "日期范围和分区不应按组分裂")
     try check(try store.listItems(group: "项目乙").map(\.title) == ["高优先级"], "组别查询应精确过滤")
     try check(try store.listItems(group: "不存在").isEmpty, "未知组应返回空列表")
+}
+
+func makeSkill(in directory: URL, content: String = "新版") throws {
+    try FileManager.default.createDirectory(at: directory.appendingPathComponent("agents"), withIntermediateDirectories: true)
+    try Data().write(to: directory.appendingPathComponent("ghostpin-cli"))
+    try Data(content.utf8).write(to: directory.appendingPathComponent("SKILL.md"))
+    try Data("配置 \(content)".utf8).write(to: directory.appendingPathComponent("agents/openai.yaml"))
+}
+
+func checkSkillInstallAndReplace() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source")
+    let target = directory.appendingPathComponent("home/.agents/skills/ghostpin-cli")
+    try makeSkill(in: source)
+    try FileManager.default.createDirectory(at: source.appendingPathComponent("nested/empty"), withIntermediateDirectories: true)
+    try Data("辅助".utf8).write(to: source.appendingPathComponent("nested/.hidden"))
+    try FileManager.default.createSymbolicLink(atPath: source.appendingPathComponent("reference").path, withDestinationPath: "SKILL.md")
+    let installer = SkillInstaller()
+    let installed = try installer.install(from: source, at: target)
+    try check(installed.path == physicalPath(target), "成功结果应为实际绝对路径")
+    try check(try Data(contentsOf: target.appendingPathComponent("nested/.hidden")) == Data("辅助".utf8), "应复制完整目录")
+    try check(try FileManager.default.destinationOfSymbolicLink(atPath: target.appendingPathComponent("reference").path) == "SKILL.md", "辅助链接应完整复制")
+    try check(FileManager.default.fileExists(atPath: target.appendingPathComponent("nested/empty").path), "空子目录应保留")
+    let other = target.deletingLastPathComponent().appendingPathComponent("other-skill")
+    try FileManager.default.createSymbolicLink(atPath: other.path, withDestinationPath: "../untouched")
+    try Data("旧文件".utf8).write(to: target.appendingPathComponent("old.txt"))
+    try Data("本地修改".utf8).write(to: target.appendingPathComponent("SKILL.md"))
+    try Data("旧标记内容不影响归属".utf8).write(to: target.appendingPathComponent("ghostpin-cli"))
+    _ = try installer.install(from: source, at: target)
+    _ = try installer.install(from: source, at: target)
+    try check(try Data(contentsOf: target.appendingPathComponent("SKILL.md")) == Data("新版".utf8), "应覆盖本地修改且可重复执行")
+    try check(!FileManager.default.fileExists(atPath: target.appendingPathComponent("old.txt").path), "应删除旧版多余文件")
+    try check(try Data(contentsOf: target.appendingPathComponent("ghostpin-cli")).isEmpty, "应以随包空标记替换旧标记")
+    try check(try FileManager.default.destinationOfSymbolicLink(atPath: other.path) == "../untouched", "其他 skill 应保持原样")
+    try check(try FileManager.default.contentsOfDirectory(atPath: target.deletingLastPathComponent().path).sorted() == ["ghostpin-cli", "other-skill"], "成功后应清理临时项")
+}
+
+func checkInvalidSkillSources() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    for missing in ["ghostpin-cli", "SKILL.md", "agents/openai.yaml", "agents", ""] {
+        let fixture = directory.appendingPathComponent(UUID().uuidString)
+        let source = fixture.appendingPathComponent("source")
+        let target = fixture.appendingPathComponent("target")
+        try makeSkill(in: source)
+        try makeSkill(in: target, content: "旧版")
+        try FileManager.default.removeItem(at: missing.isEmpty ? source : source.appendingPathComponent(missing))
+        try expectSkillFailure { _ = try SkillInstaller().install(from: source, at: target) }
+        try check(try Data(contentsOf: target.appendingPathComponent("SKILL.md")) == Data("旧版".utf8), "来源不完整不得替换旧目录")
+        let fresh = fixture.appendingPathComponent("fresh/ghostpin-cli")
+        try expectSkillFailure { _ = try SkillInstaller().install(from: source, at: fresh) }
+        try check(!FileManager.default.fileExists(atPath: fresh.deletingLastPathComponent().path), "来源不完整不得创建目标父目录")
+    }
+    for invalid in ["directory", "link", "nonempty"] {
+        let source = directory.appendingPathComponent("source-\(invalid)")
+        try makeSkill(in: source)
+        let marker = source.appendingPathComponent("ghostpin-cli")
+        try FileManager.default.removeItem(at: marker)
+        switch invalid {
+        case "directory": try FileManager.default.createDirectory(at: marker, withIntermediateDirectories: false)
+        case "link": try FileManager.default.createSymbolicLink(atPath: marker.path, withDestinationPath: "SKILL.md")
+        default: try Data("非空".utf8).write(to: marker)
+        }
+        let target = directory.appendingPathComponent("fresh-\(invalid)/ghostpin-cli")
+        try expectSkillFailure { _ = try SkillInstaller().install(from: source, at: target) }
+        try check(!FileManager.default.fileExists(atPath: target.deletingLastPathComponent().path), "无效来源标记不得创建父目录")
+    }
+}
+
+func checkSkillSymbolicLinks() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source")
+    try makeSkill(in: source)
+    for mode in ["absolute", "relative", "chain", "parent", "dotdot", "input-dotdot", "repeated"] {
+        let fixture = directory.appendingPathComponent(mode)
+        let real = fixture.appendingPathComponent("real/skill")
+        try makeSkill(in: real, content: "旧版")
+        var target = fixture.appendingPathComponent("installed")
+        var links: [String: String] = [:]
+        switch mode {
+        case "absolute": links[target.path] = real.path
+        case "relative": links[target.path] = "real/skill"
+        case "chain":
+            links[target.path] = "middle"
+            links[fixture.appendingPathComponent("middle").path] = "real/skill"
+        case "parent":
+            links[target.path] = "real"
+            target.appendPathComponent("skill")
+        case "dotdot", "input-dotdot":
+            try FileManager.default.createDirectory(at: fixture.appendingPathComponent("real/inner"), withIntermediateDirectories: false)
+            links[fixture.appendingPathComponent("shortcut").path] = "real/inner"
+            // 词法规整会误选 fixture/skill；实际目标应是 real/skill。
+            try makeSkill(in: fixture.appendingPathComponent("skill"), content: "不应替换")
+            if mode == "dotdot" {
+                links[target.path] = "shortcut/../skill"
+            } else {
+                target = URL(fileURLWithPath: fixture.path + "/shortcut/../skill")
+            }
+        default:
+            links[fixture.appendingPathComponent("shortcut").path] = "real"
+            target = URL(fileURLWithPath: fixture.path + "/shortcut/../shortcut/skill")
+        }
+        for (path, destination) in links {
+            try FileManager.default.createSymbolicLink(atPath: path, withDestinationPath: destination)
+        }
+        let installed = try SkillInstaller().install(from: source, at: target)
+        try check(installed.path == physicalPath(real), "\(mode) 应返回最终真实目录")
+        try check(try Data(contentsOf: real.appendingPathComponent("SKILL.md")) == Data("新版".utf8), "\(mode) 应替换真实目录")
+        for (path, text) in links {
+            try check(try FileManager.default.destinationOfSymbolicLink(atPath: path) == text, "\(mode) 应保留全部链接文本")
+        }
+        if mode == "dotdot" || mode == "input-dotdot" {
+            try check(try Data(contentsOf: fixture.appendingPathComponent("skill/SKILL.md")) == Data("不应替换".utf8), "不得替换词法规整所得目录")
+        }
+    }
+}
+
+func checkInvalidSkillTargets() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source")
+    try makeSkill(in: source)
+    for mode in ["unmarked", "marker-directory", "marker-link", "unmarked-link", "file", "file-link", "broken", "cycle", "parent-broken", "parent-cycle"] {
+        let fixture = directory.appendingPathComponent(mode)
+        try FileManager.default.createDirectory(at: fixture, withIntermediateDirectories: false)
+        var target = fixture.appendingPathComponent("installed")
+        let originalTarget = target
+        var links: [String: String] = [:]
+        let real = fixture.appendingPathComponent("real")
+        if ["file", "file-link"].contains(mode) {
+            try Data("保留文件".utf8).write(to: mode == "file" ? target : real)
+            if mode == "file-link" { links[target.path] = "real" }
+        } else if mode == "broken" || mode == "parent-broken" {
+            links[target.path] = "missing"
+        } else if mode == "cycle" || mode == "parent-cycle" {
+            links[target.path] = "middle"
+            links[fixture.appendingPathComponent("middle").path] = "installed"
+        } else {
+            let contentDirectory = mode == "unmarked-link" ? real : target
+            try makeSkill(in: contentDirectory, content: "旧版")
+            let marker = contentDirectory.appendingPathComponent("ghostpin-cli")
+            try FileManager.default.removeItem(at: marker)
+            if mode == "marker-directory" {
+                try FileManager.default.createDirectory(at: marker, withIntermediateDirectories: false)
+            } else if mode == "marker-link" {
+                try FileManager.default.createSymbolicLink(atPath: marker.path, withDestinationPath: "SKILL.md")
+            }
+            if mode == "unmarked-link" { links[target.path] = "real" }
+        }
+        for (path, text) in links { try FileManager.default.createSymbolicLink(atPath: path, withDestinationPath: text) }
+        if mode.hasPrefix("parent-") { target.appendPathComponent("ghostpin-cli") }
+        try expectSkillFailure { _ = try SkillInstaller().install(from: source, at: target) }
+        for (path, text) in links {
+            try check(try FileManager.default.destinationOfSymbolicLink(atPath: path) == text, "拒绝时应保留 \(mode) 链接")
+        }
+        if mode == "file" || mode == "file-link" {
+            try check(try Data(contentsOf: mode == "file" ? target : real) == Data("保留文件".utf8), "拒绝时应保留普通文件")
+        } else if ["unmarked", "marker-directory", "marker-link", "unmarked-link"].contains(mode) {
+            let contentDirectory = mode == "unmarked-link" ? real : originalTarget
+            try check(try Data(contentsOf: contentDirectory.appendingPathComponent("SKILL.md")) == Data("旧版".utf8), "拒绝时应保留目录内容")
+        }
+        try check(!FileManager.default.fileExists(atPath: fixture.appendingPathComponent("missing").path), "断链不得被创建为新目录")
+        try check(try FileManager.default.contentsOfDirectory(atPath: fixture.path).allSatisfy { !$0.hasPrefix(".ghostpin-cli-") }, "拒绝时不得创建临时项")
+    }
+}
+
+final class SkillFailingFileManager: FileManager, @unchecked Sendable {
+    enum Failure { case copy, incompleteCopy, changedCopy, backup, commit, restore, cleanup }
+    let failure: Failure
+
+    init(_ failure: Failure) { self.failure = failure }
+
+    override func copyItem(at srcURL: URL, to dstURL: URL) throws {
+        if failure == .copy {
+            try createDirectory(at: dstURL, withIntermediateDirectories: false)
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        try super.copyItem(at: srcURL, to: dstURL)
+        if failure == .incompleteCopy { try removeItem(at: dstURL.appendingPathComponent("agents/openai.yaml")) }
+        if failure == .changedCopy { try Data("错误副本".utf8).write(to: dstURL.appendingPathComponent("SKILL.md")) }
+    }
+
+    override func moveItem(at srcURL: URL, to dstURL: URL) throws {
+        if (failure == .backup && dstURL.path.hasSuffix(".backup")) ||
+            ([.commit, .restore].contains(failure) && srcURL.path.hasSuffix(".staging")) ||
+            (failure == .restore && srcURL.path.hasSuffix(".backup")) {
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        try super.moveItem(at: srcURL, to: dstURL)
+    }
+
+    override func removeItem(at URL: URL) throws {
+        if failure == .cleanup && URL.path.hasSuffix(".backup") { throw CocoaError(.fileWriteNoPermission) }
+        try super.removeItem(at: URL)
+    }
+}
+
+func checkSkillCopyFailures() throws {
+    for failure in [SkillFailingFileManager.Failure.copy, .incompleteCopy, .changedCopy, .backup] {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source")
+        let target = directory.appendingPathComponent("target")
+        try makeSkill(in: source)
+        try makeSkill(in: target, content: "旧版")
+        try expectSkillFailure { _ = try SkillInstaller(fileManager: SkillFailingFileManager(failure)).install(from: source, at: target) }
+        try check(try Data(contentsOf: target.appendingPathComponent("SKILL.md")) == Data("旧版".utf8), "准备或备份失败应保留旧版")
+        try check(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted() == ["source", "target"], "失败应清理临时项")
+    }
+}
+
+final class SkillChangingTargetFileManager: FileManager, @unchecked Sendable {
+    let target: URL
+    let replaceDirectory: Bool
+
+    init(target: URL, replaceDirectory: Bool) {
+        self.target = target
+        self.replaceDirectory = replaceDirectory
+    }
+
+    override func copyItem(at srcURL: URL, to dstURL: URL) throws {
+        try super.copyItem(at: srcURL, to: dstURL)
+        if replaceDirectory {
+            try removeItem(at: target)
+            try makeSkill(in: target, content: "外部新目录")
+        }
+        try removeItem(at: target.appendingPathComponent("ghostpin-cli"))
+    }
+}
+
+func checkSkillTargetChanges() throws {
+    for replaceDirectory in [false, true] {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source")
+        let target = directory.appendingPathComponent("target")
+        try makeSkill(in: source)
+        try makeSkill(in: target, content: "旧版")
+        let fileManager = SkillChangingTargetFileManager(target: target, replaceDirectory: replaceDirectory)
+        try expectSkillFailure { _ = try SkillInstaller(fileManager: fileManager).install(from: source, at: target) }
+        let expected = replaceDirectory ? "外部新目录" : "旧版"
+        try check(try Data(contentsOf: target.appendingPathComponent("SKILL.md")) == Data(expected.utf8), "提交前发现无标记目标应保留现有目录")
+        try check(!FileManager.default.fileExists(atPath: target.appendingPathComponent("ghostpin-cli").path), "不得自动补标记认领目标")
+        try check(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted() == ["source", "target"], "拒绝后应清理临时项")
+    }
+}
+
+func checkSkillCommitFailure() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source")
+    let real = directory.appendingPathComponent("real")
+    let link = directory.appendingPathComponent("installed")
+    try makeSkill(in: source)
+    try makeSkill(in: real, content: "旧版")
+    try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "real")
+    try expectSkillFailure { _ = try SkillInstaller(fileManager: SkillFailingFileManager(.commit)).install(from: source, at: link) }
+    try check(try Data(contentsOf: link.appendingPathComponent("SKILL.md")) == Data("旧版".utf8), "提交失败后原链接应可访问恢复的旧目录")
+    try check(try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == "real", "恢复后应保留链接文本")
+    try check(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted() == ["installed", "real", "source"], "恢复后应清理临时项")
+}
+
+func checkSkillRestoreFailure() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source")
+    let target = directory.appendingPathComponent("target")
+    try makeSkill(in: source)
+    try makeSkill(in: target, content: "旧版")
+    let message = try expectSkillFailure { _ = try SkillInstaller(fileManager: SkillFailingFileManager(.restore)).install(from: source, at: target) }
+    let backupName = try require(try FileManager.default.contentsOfDirectory(atPath: directory.path).first { $0.hasSuffix(".backup") }, "应保留旧目录副本")
+    let backup = directory.appendingPathComponent(backupName)
+    try check(message.contains(try physicalPath(backup)), "恢复失败必须报告旧副本的绝对路径")
+    try check(try Data(contentsOf: backup.appendingPathComponent("SKILL.md")) == Data("旧版".utf8), "旧副本应完整保留")
+    try check(!FileManager.default.fileExists(atPath: target.path), "恢复失败不得伪造目标成功")
+}
+
+func checkSkillCleanupFailure() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source")
+    let target = directory.appendingPathComponent("target")
+    try makeSkill(in: source)
+    try makeSkill(in: target, content: "旧版")
+    let message = try expectSkillFailure { _ = try SkillInstaller(fileManager: SkillFailingFileManager(.cleanup)).install(from: source, at: target) }
+    try check(message.contains("新 skill 已安装到") && message.contains(".backup"), "提交后清理失败应明确安装已完成并报告备份")
+    try check(try Data(contentsOf: target.appendingPathComponent("SKILL.md")) == Data("新版".utf8), "清理失败时新目录已经提交")
+}
+
+@discardableResult
+func expectSkillFailure(_ operation: () throws -> Void) throws -> String {
+    do {
+        try operation()
+        throw CheckFailure(message: "操作应失败")
+    } catch let failure as CheckFailure {
+        throw failure
+    } catch {
+        return error.localizedDescription
+    }
+}
+
+func physicalPath(_ url: URL) throws -> String {
+    guard let path = realpath(url.path, nil) else { throw CocoaError(.fileReadNoSuchFile) }
+    defer { free(path) }
+    return String(cString: path)
 }
 
 func makeTemporaryDirectory() throws -> URL {

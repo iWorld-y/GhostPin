@@ -1,5 +1,6 @@
 import Foundation
 import GhostPinCore
+import MachO
 
 private enum ExitCode: Int32 {
     case success = 0
@@ -51,6 +52,8 @@ private func run(_ arguments: [String]) throws {
         print("ghostpin-cli 0.1.0")
     case "version":
         try runVersion(Array(arguments.dropFirst()))
+    case "init":
+        try runInit(Array(arguments.dropFirst()))
     case "list":
         try runList(Array(arguments.dropFirst()))
     case "add":
@@ -68,6 +71,50 @@ private func run(_ arguments: [String]) throws {
     default:
         throw CLIError(message: "未知命令: \(command)\n\n\(usageText())", code: .usageError)
     }
+}
+
+private func runInit(_ arguments: [String]) throws {
+    if wantsHelp(arguments) {
+        printCommandHelp("init")
+        return
+    }
+    let parsed = try parseArguments(arguments, valueFlags: [], booleanFlags: ["--json"])
+    guard parsed.positionals.isEmpty else {
+        throw CLIError(message: "用法: \(usageText(for: "init"))", code: .usageError)
+    }
+    let source = try bundledSkillDirectory()
+    let target = skillInstallDirectory()
+    let installed = try SkillInstaller().install(from: source, at: target)
+    if jsonRequested {
+        try printJSON(CLIInitSuccessResponse(path: installed.path))
+    } else {
+        print("Skill 已安装到 \(installed.path)")
+    }
+}
+
+private func bundledSkillDirectory() throws -> URL {
+    var size: UInt32 = 0
+    _NSGetExecutablePath(nil, &size)
+    var buffer = [CChar](repeating: 0, count: Int(size))
+    guard _NSGetExecutablePath(&buffer, &size) == 0,
+          let path = realpath(buffer, nil) else {
+        throw CLIError(message: "无法定位当前 CLI 的实际文件路径", code: .runtimeError)
+    }
+    defer { free(path) }
+    return URL(fileURLWithPath: String(cString: path))
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("Resources/skills/ghostpin-cli", isDirectory: true)
+}
+
+private func skillInstallDirectory() -> URL {
+    #if DEBUG
+    if let path = ProcessInfo.processInfo.environment["GHOSTPIN_TEST_SKILLS_ROOT"], !path.isEmpty {
+        return URL(fileURLWithPath: path, isDirectory: true).appendingPathComponent("ghostpin-cli", isDirectory: true)
+    }
+    #endif
+    return FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".agents/skills/ghostpin-cli", isDirectory: true)
 }
 
 private func runList(_ arguments: [String]) throws {
@@ -353,6 +400,8 @@ private func wantsHelp(_ arguments: [String]) -> Bool {
 
 private func usageText(for command: String) -> String {
     switch command {
+    case "init":
+        return "ghostpin-cli init [--json]"
     case "list":
         return "ghostpin-cli list [--group <组名>] [--all] [--json]"
     case "add":
@@ -370,6 +419,14 @@ private func usageText(for command: String) -> String {
 
 private func printCommandHelp(_ command: String) {
     switch command {
+    case "init":
+        print("""
+        \(usageText(for: "init"))
+          将随包 skill 安装或覆盖更新到 ~/.agents/skills/ghostpin-cli/。
+          整目录替换会删除旧文件和本地新增文件，先解析符号链接并保留全部原链接。
+          已有真实目录必须包含普通文件归属标记 ghostpin-cli，否则拒绝覆盖。
+          --json 输出 ok 与实际安装目录的绝对路径 path。
+        """)
     case "list":
         print("""
         \(usageText(for: "list"))
@@ -414,6 +471,7 @@ private func usageText() -> String {
 ghostpin-cli - GhostPin 命令行工具
 
 命令:
+  \(usageText(for: "init"))
   \(usageText(for: "list"))
   \(usageText(for: "add"))
   \(usageText(for: "doing"))

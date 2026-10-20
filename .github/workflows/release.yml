@@ -94,6 +94,8 @@ jobs:
           test -x "$app_path/Contents/MacOS/GhostPin"
           test -x "$cli_path"
           codesign --verify --deep --strict --verbose=2 "$app_path"
+          python3 script/check_skill.py skills/ghostpin-cli "$app_path/Contents/Resources/skills/ghostpin-cli"
+          "$cli_path" init --help
 
           mount_point="$(mktemp -d)"
           cleanup() {
@@ -106,6 +108,8 @@ jobs:
           test -x "$mount_point/GhostPin.app/Contents/MacOS/GhostPin"
           test -x "$mount_point/GhostPin.app/Contents/MacOS/ghostpin-cli"
           codesign --verify --deep --strict --verbose=2 "$mount_point/GhostPin.app"
+          python3 script/check_skill.py skills/ghostpin-cli "$mount_point/GhostPin.app/Contents/Resources/skills/ghostpin-cli"
+          "$mount_point/GhostPin.app/Contents/MacOS/ghostpin-cli" init --help
           hdiutil detach "$mount_point"
           rmdir "$mount_point"
           trap - EXIT

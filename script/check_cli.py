@@ -1,20 +1,27 @@
-"""在临时任务库中检查开发版 CLI，绝不读取真实待办。"""
+"""在临时任务和 skill 目录中检查开发版 CLI。"""
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
 from pathlib import Path
+
+from check_skill import skill_entries, validate_skill
 
 
 def run(binary: Path, root: Path, *args: str, code: int = 0) -> object:
     """执行带 JSON 输出的命令并检查退出码。"""
     result = subprocess.run(
         [str(binary), *args, "--json"],
-        env={**os.environ, "GHOSTPIN_TEST_SUPPORT_ROOT": str(root)},
+        env={
+            **os.environ,
+            "GHOSTPIN_TEST_SUPPORT_ROOT": str(root),
+            "GHOSTPIN_TEST_SKILLS_ROOT": str(root / "skills"),
+        },
         capture_output=True,
         text=True,
         check=False,
@@ -62,6 +69,7 @@ def unchanged_failures(binary: Path, root: Path, task_file: Path) -> None:
 def check_help(binary: Path, root: Path) -> None:
     """根命令和全部子命令的帮助不接触任务目录。"""
     commands: list[str] = [
+        "init",
         "list",
         "add",
         "doing",
@@ -76,14 +84,154 @@ def check_help(binary: Path, root: Path) -> None:
             args = [str(binary), *([command] if command else []), flag]
             result = subprocess.run(
                 args,
-                env={**os.environ, "GHOSTPIN_TEST_SUPPORT_ROOT": str(root)},
+                env={
+                    **os.environ,
+                    "GHOSTPIN_TEST_SUPPORT_ROOT": str(root),
+                    "GHOSTPIN_TEST_SKILLS_ROOT": str(root / "skills"),
+                },
                 capture_output=True,
                 text=True,
                 check=True,
                 timeout=15,
             )
             assert "ghostpin-cli" in result.stdout
+            if command is None:
+                assert "ghostpin-cli init [--json]" in result.stdout
             assert not root.exists(), args
+
+
+def check_init(binary: Path, root: Path, source: Path) -> None:
+    """在临时 App 中验证来源定位、覆盖保护、链接、输出和隔离边界。"""
+    app = root / "GhostPin.app/Contents"
+    app_binary = app / "MacOS/ghostpin-cli"
+    bundled = app / "Resources/skills/ghostpin-cli"
+    app_binary.parent.mkdir(parents=True)
+    bundled.parent.mkdir(parents=True)
+    shutil.copy2(binary, app_binary)
+    support_root = root / "tasks-must-not-exist"
+    skills_root = root / "installed-skills"
+    target = skills_root / "ghostpin-cli"
+    env = {
+        **os.environ,
+        "GHOSTPIN_TEST_SUPPORT_ROOT": str(support_root),
+        "GHOSTPIN_TEST_SKILLS_ROOT": str(skills_root),
+    }
+
+    def invoke(
+        *arguments: str, code: int = 0, executable: Path = app_binary
+    ) -> subprocess.CompletedProcess[str]:
+        """执行隔离初始化命令，核对退出码且不触及任务目录。"""
+        result = subprocess.run(
+            [str(executable), "init", *arguments],
+            env=env,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        assert result.returncode == code, (arguments, result.stdout, result.stderr)
+        return result
+
+    # 缺资源、目标父路径是普通文件时，帮助仍应在所有文件访问前返回。
+    help_env_root = root / "help-skills"
+    help_env_root.write_bytes(b"not a directory")
+    env["GHOSTPIN_TEST_SKILLS_ROOT"] = str(help_env_root)
+    for flag in ("-h", "--help"):
+        help_result = invoke(flag)
+        for text in (
+            "~/.agents/skills/ghostpin-cli/",
+            "符号链接",
+            "归属标记",
+            "--json",
+        ):
+            assert text in help_result.stdout
+        assert help_env_root.read_bytes() == b"not a directory"
+        assert not support_root.exists()
+    missing = json.loads(invoke("--json", code=1).stdout)
+    assert missing["ok"] is False and "error" in missing
+    assert not support_root.exists()
+    env["GHOSTPIN_TEST_SKILLS_ROOT"] = str(skills_root)
+    for arguments in (("extra",), ("--unknown",), ("--group", "默认"), ("-q",)):
+        failure = json.loads(invoke(*arguments, "--json", code=2).stdout)
+        assert failure["ok"] is False
+        assert not skills_root.exists() and not support_root.exists()
+    shutil.copytree(source, bundled, symlinks=True)
+    (bundled / "nested/empty").mkdir(parents=True)
+    (bundled / "nested/.hidden").write_bytes(b"bundled helper")
+
+    installed = json.loads(invoke("--json").stdout)
+    assert installed == {"ok": True, "path": str(target.resolve())}
+    validate_skill(bundled, target)
+    assert not support_root.exists()
+    other = skills_root / "other-skill"
+    other.symlink_to("../unrelated")
+    (target / "old-file").write_bytes(b"stale")
+    (target / "SKILL.md").write_bytes(b"local change")
+    text_result = invoke()
+    assert str(target.resolve()) in text_result.stdout
+    validate_skill(bundled, target)
+    assert other.readlink() == Path("../unrelated")
+
+    # 调用当前 CLI 的链接时，来源仍应来自实际二进制相邻资源。
+    cli_link = root / "cli-link"
+    cli_link.symlink_to("GhostPin.app/Contents/MacOS/ghostpin-cli")
+    installed = json.loads(invoke("--json", executable=cli_link).stdout)
+    assert installed == {"ok": True, "path": str(target.resolve())}
+
+    real = root / "real-skill"
+    target.rename(real)
+    middle = root / "middle-skill"
+    middle.symlink_to("real-skill")
+    target.symlink_to("../middle-skill")
+    installed = json.loads(invoke("--json").stdout)
+    assert installed == {"ok": True, "path": str(real.resolve())}
+    assert target.readlink() == Path("../middle-skill")
+    assert middle.readlink() == Path("real-skill")
+    validate_skill(bundled, real)
+    before = skill_entries(real)
+    for arguments in (("extra",), ("--unknown",)):
+        failure = json.loads(invoke(*arguments, "--json", code=2).stdout)
+        assert failure["ok"] is False and skill_entries(real) == before
+
+    (real / "ghostpin-cli").unlink()
+    failure = json.loads(invoke("--json", code=1).stdout)
+    assert failure["ok"] is False and "归属标记" in failure["error"]
+    assert (real / "SKILL.md").read_bytes() == (bundled / "SKILL.md").read_bytes()
+    assert not (real / "ghostpin-cli").exists()
+    assert target.readlink() == Path("../middle-skill")
+    target.unlink()
+    for destination in ("missing", "ghostpin-cli"):
+        target.symlink_to(destination)
+        failure = json.loads(invoke("--json", code=1).stdout)
+        assert failure["ok"] is False and target.readlink() == Path(destination)
+        target.unlink()
+    target.write_bytes(b"keep this file")
+    failure = json.loads(invoke("--json", code=1).stdout)
+    assert failure["ok"] is False and target.read_bytes() == b"keep this file"
+    target.unlink()
+    shutil.copytree(bundled, target, symlinks=True)
+
+    # 已有损坏任务也不应被 init 读取、迁移或改写。
+    task = support_root / "GhostPin/todos.json"
+    task.parent.mkdir(parents=True)
+    task.write_bytes(b"unreadable task document")
+    task.chmod(0)
+    try:
+        invoke("--json")
+        for required in ("ghostpin-cli", "SKILL.md", "agents/openai.yaml"):
+            path = bundled / required
+            content = path.read_bytes()
+            path.unlink()
+            failure = json.loads(invoke("--json", code=1).stdout)
+            assert failure["ok"] is False
+            path.write_bytes(content)
+            validate_skill(bundled, target)
+        assert list(task.parent.iterdir()) == [task]
+    finally:
+        task.chmod(0o600)
+    assert task.read_bytes() == b"unreadable task document"
+    print("PASS init 隔离检查：来源定位、帮助、参数、完整替换、链接、归属和任务隔离")
 
 
 def main() -> None:
@@ -93,6 +241,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="ghostpin-cli-check-") as temporary:
         root = Path(temporary)
         check_help(binary, root / "help-must-not-exist")
+        check_init(binary, root / "init-check", repository / "skills/ghostpin-cli")
         assert run(binary, root, "list") == []
         task_file = root / "GhostPin/todos.json"
         assert not task_file.exists()

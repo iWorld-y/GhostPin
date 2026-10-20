@@ -11,6 +11,11 @@ struct CLIIdSuccessResponse: Encodable {
     let id: TodoItem.ID
 }
 
+struct CLIInitSuccessResponse: Encodable {
+    let ok = true
+    let path: String
+}
+
 struct CLIFailureResponse: Encodable {
     let ok = false
     let error: String

@@ -60,10 +60,22 @@ ghostpin-cli is installed inside the app bundle. The user-facing Skill always us
 
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli
 
+After installing or upgrading GhostPin.app, install or update the bundled skill:
+
+```bash
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli init
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli init --json
+```
+
+`init` installs the complete skill into `~/.agents/skills/ghostpin-cli/` and creates missing parent directories. Each run replaces the whole directory, removing obsolete files and locally added files. A successful result includes the absolute path of the actual installation directory.
+
+If the installation path is a symbolic link, the command resolves the final directory, replaces that directory, and preserves the original links. An existing directory must contain a regular file named `ghostpin-cli` as its ownership marker, or the command refuses to overwrite it. For an older directory without a marker, verify that it belongs to the GhostPin skill, manually add this empty regular file in the actual directory, and run initialization again. Broken links, link cycles, and targets that are not directories produce an error.
+
 Every command supports -h and --help. To inspect command options:
 
 ```bash
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli --help
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli init --help
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update --help
 ```
 

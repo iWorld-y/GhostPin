@@ -37,6 +37,10 @@ if [[ -d "$ROOT_DIR/Sources/GhostPin/Resources" ]]; then
   rsync -a --exclude 'Models/README.md' "$ROOT_DIR/Sources/GhostPin/Resources/" "$APP_RESOURCES/"
 fi
 
+mkdir -p "$APP_RESOURCES/skills"
+cp -R "$ROOT_DIR/skills/ghostpin-cli" "$APP_RESOURCES/skills/ghostpin-cli"
+python3 "$ROOT_DIR/script/check_skill.py" "$ROOT_DIR/skills/ghostpin-cli" "$APP_RESOURCES/skills/ghostpin-cli"
+
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -60,10 +60,22 @@ ghostpin-cli 随应用安装在 App Bundle 内。用户向 Skill 使用固定完
 
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli
 
+安装或升级 GhostPin.app 后，执行以下命令安装或更新随包 skill：
+
+```bash
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli init
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli init --json
+```
+
+`init` 将完整 skill 安装到 `~/.agents/skills/ghostpin-cli/`，缺少父目录时自动创建。重复执行会整目录替换，移除旧版本多余文件和本地新增文件。成功结果包含实际安装目录的绝对路径。
+
+安装路径是符号链接时，命令解析到最终真实目录，在真实目录执行替换并保留原链接。已有目录必须包含名为 `ghostpin-cli` 的普通文件作为归属标记，否则拒绝覆盖。旧版目录缺少标记时，确认目录属于 GhostPin skill 后，可在真实目录手动补充这个空普通文件，再重新执行初始化。断开的链接、链接循环和非目录目标均会报错。
+
 所有命令都支持 -h 和 --help。需要确认参数时，可先执行：
 
 ```bash
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli --help
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli init --help
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update --help
 ```
 
