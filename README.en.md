@@ -156,6 +156,8 @@ swift run GhostPinCoreChecks
 bash script/release.sh
 ```
 
+After publishing a GitHub Release, the workflow mirrors its release notes and DMG to Gitee. See [Gitee release synchronization](docs/gitee-release.md) for credentials and retry instructions.
+
 For Developer ID distribution:
 
 ```bash

@@ -156,6 +156,8 @@ swift run GhostPinCoreChecks
 bash script/release.sh
 ```
 
+GitHub Release 发布成功后会同步版本说明和 DMG 到 Gitee，凭据配置与失败重试见 [Gitee 发行版同步](docs/gitee-release.md)。
+
 使用 Developer ID 证书公开发布：
 
 ```bash

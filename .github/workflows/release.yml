@@ -260,3 +260,29 @@ jobs:
             --verify-tag \
             --title "GhostPin ${VERSION}" \
             --notes-file "$notes_file"
+
+  sync-gitee:
+    needs: [metadata, release]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.metadata.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: gitee-release-${{ needs.metadata.outputs.tag }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 1
+
+      - name: Check Gitee release synchronization
+        run: python3 script/check_gitee_release.py
+
+      - name: Sync GitHub Release and DMG to Gitee
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+        run: python3 script/sync_gitee_release.py "$TAG"
