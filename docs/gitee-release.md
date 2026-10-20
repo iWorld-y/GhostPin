@@ -25,6 +25,14 @@ GitHub 读取使用流程自带的 `GITHUB_TOKEN`。Gitee 同步直接接在现�
 - Gitee 缺少标签时，创建 Release 时使用 GitHub 标签的提交 SHA；该提交需已推送到 Gitee。两端同名标签指向不同提交时停止同步，先以 GitHub 为准校正 Gitee 标签，再重试。
 - 写请求超时后停止运行，不自动重发。下一次运行先读取远端状态，再补齐未完成部分。
 
+同步脚本在发版后修复时，原运行重试仍会使用版本标签中的旧脚本。此时使用 [Sync Gitee Release](https://github.com/iWorld-y/GhostPin/actions/workflows/sync-gitee.yml)，分支选择 `main`，`tag` 填写已发布的版本标签。该入口读取 `main` 上的同步脚本，下载指定 GitHub Release 的现有 DMG 并同步。
+
+例如补同步 `v1.2.2`：
+
+```bash
+gh workflow run sync-gitee.yml --repo iWorld-y/GhostPin --ref main -f tag=v1.2.2
+```
+
 本地隔离检查：
 
 ```bash

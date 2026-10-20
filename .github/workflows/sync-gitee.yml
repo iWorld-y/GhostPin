@@ -1,0 +1,37 @@
+name: Sync Gitee Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已发布的 GitHub Release 标签，例如 v1.2.2
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sync-gitee:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: gitee-release-${{ inputs.tag }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout current synchronization script
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Check Gitee release synchronization
+        run: python3 script/check_gitee_release.py
+
+      - name: Sync GitHub Release and DMG to Gitee
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITEE_TOKEN: ${{ secrets.GITEE }}
+          TAG: ${{ inputs.tag }}
+        run: python3 script/sync_gitee_release.py "$TAG"

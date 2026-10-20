@@ -41,6 +41,7 @@ class ReleaseSyncChecks(unittest.TestCase):
         self.attachments: dict[int, bytes] = {}
         self.calls: list[tuple[str, str]] = []
         self.tag_commit = COMMIT
+        self.missing_release_returns_null = False
         self.lose_create_response = False
         self.lose_upload_response = False
         self.corrupt_upload = False
@@ -75,6 +76,8 @@ class ReleaseSyncChecks(unittest.TestCase):
             return None
         if path == f"releases/tags/{TAG}":
             if self.release is None:
+                if self.missing_release_returns_null:
+                    return None
                 raise sync.GiteeAPIError(method, path, 404)
             return self.release.copy()
         if (method, path) == ("POST", "releases"):
@@ -107,6 +110,17 @@ class ReleaseSyncChecks(unittest.TestCase):
         assert self.release is not None
         self.assertEqual(self.release["target_commitish"], COMMIT)
         self.assertEqual(self.release["body"], self.source["body"])
+        self.assertEqual(self.attachments, {100: DMG})
+        self.calls.clear()
+        sync.sync_release(TAG, "test-token")
+        self.assertTrue(all(method == "GET" for method, _ in self.calls))
+
+    def test_initial_null_lookup_creates_release_and_identical_retry(self) -> None:
+        self.missing_release_returns_null = True
+        sync.sync_release(TAG, "test-token")
+        assert self.release is not None
+        self.assertEqual(self.release["target_commitish"], COMMIT)
+        self.assertEqual(self.calls.count(("POST", "releases")), 1)
         self.assertEqual(self.attachments, {100: DMG})
         self.calls.clear()
         sync.sync_release(TAG, "test-token")
@@ -181,6 +195,14 @@ class ReleaseSyncChecks(unittest.TestCase):
 
 class GiteeAPIChecks(unittest.TestCase):
     """检查 curl 契约，避免 Token 出现在参数中或隐式重发写请求。"""
+
+    def test_http_200_null_response(self) -> None:
+        with patch.object(
+            sync.subprocess, "run", return_value=SimpleNamespace(stdout="null\n200")
+        ):
+            self.assertIsNone(
+                sync.gitee_api("GET", f"releases/tags/{TAG}", "test-secret")
+            )
 
     def test_json_request(self) -> None:
         with patch.object(

@@ -151,6 +151,8 @@ def sync_release(tag: str, token: str) -> None:
         except GiteeAPIError as error:
             if error.status != 404:
                 raise
+            release = None
+        if release is None:
             release = gitee_api(
                 "POST",
                 "releases",
