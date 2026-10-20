@@ -17,6 +17,13 @@
 - 升级前退出旧 App 和 CLI，并一起更新应用与随包 CLI。全部历史任务（含已完成）首次成功访问时迁入 `默认`，原始数组保存在同目录 `todos.v1.backup.json`。
 - 旧 UUID 不再接受为操作参数，旧程序不能读取新文档。回退说明见 `docs/task-storage.md`；原始备份不包含升级后的新增和修改。
 
+## v1.2.2 - 2026-10-20
+
+### Changed
+
+- GitHub Release 发布成功后，自动将同版本的发布说明和 macOS DMG 同步到 Gitee。
+- Gitee 同步以 GitHub 为准，校验标签提交和附件 SHA-256，支持中断后重试；同步失败时保留已发布的 GitHub Release。
+
 ## v1.1.0 - 2026-08-20
 
 ### Added
