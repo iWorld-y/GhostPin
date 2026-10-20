@@ -201,7 +201,7 @@ def main() -> int:
     arguments = parser.parse_args()
     token = os.environ.get("GITEE_TOKEN", "")
     if not token:
-        print("同步失败：请配置 GitHub Actions Secret GITEE_TOKEN", file=sys.stderr)
+        print("同步失败：请配置 GitHub Actions Secret GITEE", file=sys.stderr)
         return 1
     try:
         sync_release(arguments.tag, token)

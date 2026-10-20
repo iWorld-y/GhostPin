@@ -283,6 +283,6 @@ jobs:
       - name: Sync GitHub Release and DMG to Gitee
         env:
           GH_TOKEN: ${{ github.token }}
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_TOKEN: ${{ secrets.GITEE }}
           TAG: ${{ needs.metadata.outputs.tag }}
         run: python3 script/sync_gitee_release.py "$TAG"
