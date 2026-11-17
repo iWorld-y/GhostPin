@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GhostPin 设计基线 · 界面原型</title>
+  <link rel="icon" href="assets/GhostPinLogo.png">
+  <link rel="stylesheet" href="styles/tokens.css"><link rel="stylesheet" href="styles/components.css"><link rel="stylesheet" href="styles/preview.css">
+  <script defer src="scripts/model.js"></script><script defer src="scripts/components.js"></script><script defer src="scripts/app.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="site-brand" href="index.html"><img src="assets/GhostPinLogo.png" width="1254" height="1254" alt="GhostPin 标志"><span>GhostPin<small>现有产品设计基线</small></span></a>
+    <nav class="site-nav" aria-label="设计基线导航"><a href="index.html" aria-current="page">界面原型</a><a href="components.html">组件与状态</a><a href="DESIGN.md">设计规范 ↗</a></nav>
+  </header>
+  <div class="workspace">
+    <aside class="sidebar" aria-label="原型演示控制">
+      <p class="eyebrow">SOURCE BASELINE</p><h1>沿用现有界面</h1><p>基于当前源码整理。以下控件只用于演示，不属于应用界面。</p>
+      <label class="control-field"><span>平台</span><select id="platform"><option value="mac">macOS</option><option value="windows">Windows</option></select></label>
+      <label class="control-field"><span>外观</span><select id="appearance"><option value="light">浅色</option><option value="dark">深色</option></select><small id="appearance-note">网页颜色近似系统语义色</small></label>
+      <label class="control-field"><span>任务场景</span><select id="scenario"><option value="standard">默认设置，聚焦 Doing</option><option value="mixed">同时展示 Doing 与 Todo</option><option value="long">长标题与长分组</option><option value="overflow">超出可见区域</option><option value="empty">空列表</option></select></label>
+      <label class="control-field"><span>演示宽度</span><input id="preview-width" type="range" min="320" max="640" step="4" value="380"><output id="width-output" for="preview-width">380 px</output></label>
+      <button class="shell-button" id="mode-button">切换到交互模式</button><button class="shell-button" id="open-settings">打开设置窗口</button>
+      <div class="sidebar-footer"><button class="shell-button" id="reset">重置示例</button><a href="components.html">查看完整组件状态 →</a></div>
+    </aside>
+    <main class="main">
+      <div class="page-heading"><div><p class="eyebrow">01 / 界面原型</p><h2>桌面便签与设置</h2><p>保留紧凑布局、原有信息层级和状态推进。</p></div><span class="baseline-label">源码基线 · 2026.11.17</span></div>
+      <section class="desktop-stage" id="desktop-stage" data-theme="light" aria-label="桌面界面模拟">
+        <div class="desktop-bar"><span id="platform-caption">macOS 桌面模拟</span><button class="tray-button" id="tray-button" aria-label="打开 GhostPin 菜单" aria-expanded="false" aria-controls="menu-host"><img src="assets/GhostPinStatusBar.png" width="1254" height="1254" alt=""><span id="tray-count"></span></button></div>
+        <div class="menu-host" id="menu-host" hidden></div>
+        <div class="native-workspace"><div class="hud-zone" id="hud-zone"><div class="hud-frame-label"><span id="surface-label">桌面 HUD</span><span>示例任务</span></div><div id="hud-host"></div></div><div class="settings-host" id="settings-host"></div></div>
+      </section>
+      <div class="stage-caption"><p id="mode-explanation">通过菜单切换交互模式后，可推进示例任务状态。</p><a class="spec-link" href="DESIGN.md#原型边界">原型边界 ↗</a></div>
+      <p class="interaction-note" id="interaction-note" role="status" aria-live="polite">默认穿透模式。点击左侧“切换到交互模式”开始体验。</p>
+      <div class="facts"><section><h3>状态按既有流程推进</h3><p><code>Todo → Doing → Done</code>。同一任务成功推进后，500ms 内忽略重复点击。</p></section><section><h3>设置与示例即时联动</h3><p>显示范围、条数和透明度会更新示例。系统置顶、跨 Space 和登录启动仅展示开关状态。</p></section><section><h3>保留平台差异</h3><p>macOS 使用系统材质近似外观。Windows 保留当前白底绿边卡片和原生设置结构。</p></section></div>
+      <noscript><p>请启用 JavaScript 查看可交互原型。设计规则仍可通过 <a href="DESIGN.md">DESIGN.md</a> 阅读。</p></noscript>
+    </main>
+  </div>
+  <footer class="site-footer">示例日期固定为 2026 年 11 月 17 日。刷新页面恢复示例；不读取真实任务，不修改原有业务源码。</footer>
+</body></html>

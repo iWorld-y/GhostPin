@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GhostPin 设计基线 · 组件与状态</title><link rel="icon" href="assets/GhostPinLogo.png">
+  <link rel="stylesheet" href="styles/tokens.css"><link rel="stylesheet" href="styles/components.css"><link rel="stylesheet" href="styles/preview.css">
+  <script defer src="scripts/model.js"></script><script defer src="scripts/components.js"></script><script defer src="scripts/catalog.js"></script>
+</head>
+<body>
+  <header class="site-header"><a class="site-brand" href="index.html"><img src="assets/GhostPinLogo.png" width="1254" height="1254" alt="GhostPin 标志"><span>GhostPin<small>现有产品设计基线</small></span></a><nav class="site-nav" aria-label="设计基线导航"><a href="index.html">界面原型</a><a href="components.html" aria-current="page">组件与状态</a><a href="DESIGN.md">设计规范 ↗</a></nav></header>
+  <main class="catalog">
+    <header class="catalog-header"><p class="eyebrow">02 / 公共组件</p><h1>组件与状态</h1><p>与页面原型共用组件、样式和任务规则。原生界面保留当前字号与密度；系统材质、语义色和控件外观在网页中近似展示。</p><div class="catalog-toolbar"><label>macOS 外观 <select id="catalog-theme"><option value="light">浅色</option><option value="dark">深色</option></select></label><a class="spec-link" href="#task-rows">任务行</a><a class="spec-link" href="#boards">HUD</a><a class="spec-link" href="#settings">设置状态</a><a class="spec-link" href="#tokens">设计变量</a></div></header>
+    <section class="catalog-section" id="task-rows"><h2>任务行与状态按钮</h2><p>状态、文字和右侧元信息使用固定的三列结构。以下是指定状态样本，不会推进任务。</p><div class="catalog-grid" id="row-states"></div><p id="catalog-feedback" class="interaction-note" role="status" aria-live="polite"></p></section>
+    <section class="catalog-section" id="boards"><h2>HUD 容器与内容状态</h2><p>macOS 默认宽度 380px、圆角 14px。Windows 默认窗口宽度 360px，卡片风格单独保留。</p><div class="catalog-grid" id="board-states"></div></section>
+    <section class="catalog-section" id="settings"><h2>快捷键配置状态</h2><p>包含关闭、待配置、录制中、已注册、注册失败和无效按键。系统注册只在真实应用中发生。</p><div class="catalog-toolbar"><label>展示状态 <select id="hotkey-example"><option value="disabled">关闭 / 未设置</option><option value="pendingConfiguration">已开启 / 待配置</option><option value="recording">录制中</option><option value="registered">注册成功示例</option><option value="failure">注册失败示例</option><option value="invalid">按键规则错误</option></select></label></div><div class="catalog-demo" id="settings-example"></div></section>
+    <section class="catalog-section" id="flow"><h2>状态推进演示</h2><p>Doing 位于 Todo 之前。完成后任务立即移除，同一任务有 500ms 点击冷却。</p><div class="catalog-demo"><div id="state-demo"></div><button class="shell-button" id="demo-reset">重置状态示例</button><p class="interaction-note" id="demo-feedback" role="status" aria-live="polite">点击圆形按钮推进示例任务。</p></div></section>
+    <section class="catalog-section" id="tokens"><h2>颜色与语义</h2><p>原生代码使用系统动态颜色，以下色块是 HTML 近似值。后续原生实现应继续引用系统颜色，避免改为固定色值。</p><div class="token-grid" id="color-tokens"></div></section>
+    <section class="catalog-section"><h2>字体与几何尺寸</h2><p>保留现有源码中的紧凑数值，不将原生 HUD 强行套用网页正文的 16px 字号。</p><div class="table-wrap"><table><thead><tr><th scope="col">对象</th><th scope="col">macOS 基线</th><th scope="col">对应规则</th></tr></thead><tbody>
+      <tr><td>应用名</td><td>12.5pt，Semibold</td><td>系统字体，标志 21 × 21pt</td></tr><tr><td>任务标题</td><td>13pt，Medium</td><td>最多两行</td></tr><tr><td>描述</td><td>11pt，Regular</td><td>单行尾部省略</td></tr><tr><td>日期 / 头部计数</td><td>10pt，等宽</td><td>右侧元信息列宽 84pt</td></tr><tr><td>分区 / 页脚</td><td>9.5pt，等宽</td><td>分区字距 1pt</td></tr><tr><td>HUD 容器</td><td>380pt，最小 320 × 144pt</td><td>头部 39pt，页脚 25pt，列表最多 396pt</td></tr><tr><td>任务行</td><td>左右 12pt，上 6pt，下 7pt</td><td>列间距 9pt，状态列 15pt</td></tr><tr><td>状态按钮</td><td>命中区域 27 × 27pt</td><td>图形约 11pt，焦点描边 2pt</td></tr><tr><td>组别标签</td><td>10pt，Semibold</td><td>文字最多三个汉字宽；水平内边距 4pt</td></tr><tr><td>动效</td><td>180ms，easeInOut</td><td>原型响应减少动态效果设置</td></tr>
+    </tbody></table></div></section>
+    <section class="catalog-section"><h2>复用与维护</h2><p>修改颜色、字号和尺寸时先更新共用设计变量。新增组件状态应同时补充本页样本和 DESIGN.md 中的源码对应关系。</p><a href="DESIGN.md">阅读完整设计规范与维护规则 →</a></section>
+  </main><footer class="site-footer">状态样本使用独立示例数据。原型与组件页共用渲染模块，不修改原有业务源码。</footer>
+</body></html>

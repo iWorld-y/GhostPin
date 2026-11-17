@@ -1,0 +1,44 @@
+/* 从现有 GhostPin 界面提取的数值；系统语义色的网页近似值见 DESIGN.md。 */
+:root {
+  color-scheme: light;
+  --font-ui: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --font-windows: 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+  --page: #f6f7f8; --surface: #fff; --ink: #23262b; --muted: #646b75;
+  --line: #dce0e5; --action: #1761c7; --focus: #1672de;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+  --size-body: 16px; --size-small: 13px; --size-heading: 28px;
+  --radius-control: 6px; --radius-panel: 12px;
+  --motion: 180ms; --ease: ease-in-out;
+  --hud-width: 380px; --hud-min-width: 320px; --hud-header: 39px;
+  --hud-footer: 25px; --hud-body-max: 396px; --hud-empty: 80px;
+  --hud-radius: 14px; --hud-pad: 12px; --hud-row-gap: 9px;
+  --hud-row-top: 6px; --hud-row-bottom: 7px; --hud-meta-width: 84px;
+  --hud-status-width: 15px; --hud-status-hit: 27px;
+  --hud-title-size: 13px; --hud-description-size: 11px;
+  --hud-brand-size: 12.5px; --hud-meta-size: 10px; --hud-section-size: 9.5px;
+  --hud-logo-size: 21px; --hud-close-size: 20px; --hud-rule: .5px;
+  --hud-surface: rgb(245 245 247 / 92%); --hud-section: rgb(239 239 242 / 96%);
+  --hud-ink: #202124; --hud-secondary: #696a70; --hud-red: #d3262e;
+  --hud-accent: #007aff; --hud-hover: rgb(0 0 0 / 6%);
+  --hud-separator: rgb(0 0 0 / 8%); --hud-border: rgb(0 0 0 / 14%);
+  --hud-border-pass: rgb(0 0 0 / 10%); --hud-badge: rgb(110 110 115 / 10%);
+  --hud-shadow: 0 8px 20px rgb(0 0 0 / 18%);
+  --hud-shadow-pass: 0 8px 20px rgb(0 0 0 / 11%);
+  --hud-blur: 20px; --settings-width: 420px;
+  --win-width: 360px; --win-height: 460px; --win-radius: 26px;
+  --win-card-radius: 16px; --win-card-height: 72px;
+  --win-surface: rgb(255 255 255 / 94%); --win-card: rgb(255 255 255 / 72%);
+  --win-border: rgb(184 214 166 / 88%); --win-ink: #21241f;
+  --win-secondary: #6b7369; --win-accent: rgb(143 186 120 / 92%);
+}
+[data-theme='dark'] {
+  color-scheme: dark;
+  --hud-surface: rgb(35 35 38 / 94%); --hud-section: rgb(43 43 46 / 97%);
+  --hud-ink: #f2f2f5; --hud-secondary: #aaaab1; --hud-red: #ff6961;
+  --hud-accent: #64aaff; --hud-hover: rgb(255 255 255 / 6%);
+  --hud-separator: rgb(255 255 255 / 8%); --hud-border: rgb(255 255 255 / 14%);
+  --hud-border-pass: rgb(255 255 255 / 10%); --hud-badge: rgb(170 170 177 / 10%);
+}
+@media (prefers-reduced-motion: reduce) { :root { --motion: 0ms; } }

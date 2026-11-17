@@ -1,0 +1,7 @@
+{
+  "assets": [
+    {"file":"GhostPinLogo.png","source":"/Users/jty/project/GhostPin/Sources/GhostPin/Resources/Logo/GhostPinLogo.png","width":1254,"height":1254,"use":"应用标志","license":"仓库 MIT License，完整声明见 LICENSE-GhostPin.txt","authors":["oyuxi","Eugene Jiang"]},
+    {"file":"GhostPinStatusBar.png","source":"/Users/jty/project/GhostPin/Sources/GhostPin/Resources/Logo/GhostPinStatusBar.png","width":1254,"height":1254,"use":"菜单栏标志","license":"仓库 MIT License，完整声明见 LICENSE-GhostPin.txt","authors":["oyuxi","Eugene Jiang"]}
+  ],
+  "note":"用户提供的本地项目资产，未重新生成或裁剪。原生系统图标在 HTML 中用简单几何形状近似，不包含 SF Symbols 字体文件。"
+}

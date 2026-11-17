@@ -1,0 +1,63 @@
+{
+  "sourceRoot": "/Users/jty/project/GhostPin",
+  "capturedAt": "2026-11-17T12:39:59.749318+00:00",
+  "purpose": "设计基线源码追溯；仅读取源码，没有运行原生应用或真实任务查询",
+  "files": [
+    {
+      "path": "Sources/GhostPin/Views/DesktopNotesBoardView.swift",
+      "sha256": "dd5ac7b7edab3641dde397ca47f7a04f4bfa1dadddb07591f5a9c135c975d63c"
+    },
+    {
+      "path": "Sources/GhostPin/Views/MenuBarContentView.swift",
+      "sha256": "97eec225f53dc9fe4ad42b0fe53d72835b5741c9d76073a20da73e7d376e6f49"
+    },
+    {
+      "path": "Sources/GhostPin/Views/SettingsView.swift",
+      "sha256": "213be5a9ae6517d0081270ef271dd6cb4646df0feea5ba6ddacde96b159aa98a"
+    },
+    {
+      "path": "Sources/GhostPin/Views/GhostPinLogoView.swift",
+      "sha256": "a3b3044b59602db7a6f0126bae086b65ab5639ef8d79729ebe5a1635b42d168e"
+    },
+    {
+      "path": "Sources/GhostPin/App/AppPreferences.swift",
+      "sha256": "75a29f77fb45dd4337e9613f9104dc0f65ba3d1f282cfafc5de60477aa50257e"
+    },
+    {
+      "path": "Sources/GhostPin/App/AppState.swift",
+      "sha256": "b2f9f29ac4614694a4178cf103d9181ddb347e82eaec04c98aa60d0edd9638c0"
+    },
+    {
+      "path": "Sources/GhostPin/App/WindowCoordinator.swift",
+      "sha256": "7b3a06fee39e07a038cf9ed09779cbe9a0ee83f341bd73c5249969ec07748459"
+    },
+    {
+      "path": "Sources/GhostPin/App/GhostPinApp.swift",
+      "sha256": "5225506fcca5695d73b7c31d0efc822413019bed8157e00ecb439adf3805b069"
+    },
+    {
+      "path": "Sources/GhostPinCore/Stores/TodoStore.swift",
+      "sha256": "3a648c90d459b62e0a645e61426d5fcd9bcc320783c361d759266f88dcfaa361"
+    },
+    {
+      "path": "Sources/GhostPinCore/Models/HudProjection.swift",
+      "sha256": "54000b65795d84e75407457895a7318573530320c273e6ac1f276702e1813be5"
+    },
+    {
+      "path": "Sources/GhostPinCore/Models/TodoItem.swift",
+      "sha256": "9338ea5767cbec7e7015487699a423df726f878d8ae75698ef36f247f6b59650"
+    },
+    {
+      "path": "windows-native/src/render.rs",
+      "sha256": "a956c31fed802042fda3cdba7dbdc9cdd630c4e0fafa0528c582a2f59d4e70d8"
+    },
+    {
+      "path": "windows-native/src/settings.rs",
+      "sha256": "981deadf0830ab9f3fe93c3fd50c8a1caa0d04214fcd92f3b2b41f7472d09435"
+    },
+    {
+      "path": "windows-native/src/core.rs",
+      "sha256": "277f82dde1b7343e54fe2a958318ce10e886670a86447e59820cd0747821d025"
+    }
+  ]
+}
