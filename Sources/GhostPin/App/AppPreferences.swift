@@ -6,6 +6,12 @@ enum HudMode: String, Codable, CaseIterable {
     case interactive
 }
 
+/// 交互模式下用户主动选择的视图；穿透模式始终收为列表。
+enum HudView: String, Codable, CaseIterable {
+    case list
+    case quadrants
+}
+
 struct HudWindowFrame: Codable, Equatable {
     var x: CGFloat
     var y: CGFloat
@@ -28,6 +34,16 @@ final class AppPreferences: ObservableObject {
 
     @Published var hudMode: HudMode {
         didSet { saveHudMode() }
+    }
+
+    /// 交互模式最后一次主动选择的视图，缺省为列表；自动收为列表不改写此偏好。
+    @Published var hudInteractiveView: HudView {
+        didSet { defaults.set(hudInteractiveView.rawValue, forKey: Keys.hudInteractiveView) }
+    }
+
+    /// 当前生效视图：菜单栏、快捷键与启动恢复共用同一取值路径。
+    var effectiveHudView: HudView {
+        hudMode == .interactive ? hudInteractiveView : .list
     }
 
     @Published var hudPassthroughOpacity: Double {
@@ -59,6 +75,11 @@ final class AppPreferences: ObservableObject {
         didSet { saveHudFrame() }
     }
 
+    /// 四象限布局的窗口尺寸，与列表的 hudFrame 分开保存。
+    @Published var hudQuadrantsFrame: HudWindowFrame? {
+        didSet { saveHudQuadrantsFrame() }
+    }
+
     @Published var hudModeHotKeyEnabled: Bool {
         didSet { defaults.set(hudModeHotKeyEnabled, forKey: Keys.hudModeHotKeyEnabled) }
     }
@@ -76,6 +97,7 @@ final class AppPreferences: ObservableObject {
         self.launchAtLogin = defaults.bool(forKey: Keys.launchAtLogin)
 
         self.hudMode = defaults.string(forKey: Keys.hudMode).flatMap(HudMode.init(rawValue:)) ?? .passthrough
+        self.hudInteractiveView = defaults.string(forKey: Keys.hudInteractiveView).flatMap(HudView.init(rawValue:)) ?? .list
         let legacyOpacity = defaults.object(forKey: Keys.hudOpacity) as? Double
         let passthroughOpacity = defaults.object(forKey: Keys.hudPassthroughOpacity) as? Double
             ?? (legacyOpacity.map { $0 * 0.86 } ?? 1.0)
@@ -94,6 +116,12 @@ final class AppPreferences: ObservableObject {
             self.hudFrame = decoded
         } else {
             self.hudFrame = nil
+        }
+        if let data = defaults.data(forKey: Keys.hudQuadrantsFrame),
+           let decoded = try? JSONDecoder.ghostPin.decode(HudWindowFrame.self, from: data) {
+            self.hudQuadrantsFrame = decoded
+        } else {
+            self.hudQuadrantsFrame = nil
         }
         self.hudModeHotKeyEnabled = defaults.bool(forKey: Keys.hudModeHotKeyEnabled)
         if let data = defaults.data(forKey: Keys.hudModeHotKeyShortcut),
@@ -121,6 +149,30 @@ final class AppPreferences: ObservableObject {
         defaults.set(data, forKey: Keys.hudFrame)
     }
 
+    private func saveHudQuadrantsFrame() {
+        guard let hudQuadrantsFrame,
+              let data = try? JSONEncoder.ghostPin.encode(hudQuadrantsFrame) else {
+            defaults.removeObject(forKey: Keys.hudQuadrantsFrame)
+            return
+        }
+        defaults.set(data, forKey: Keys.hudQuadrantsFrame)
+    }
+
+    /// Debug 隔离验证：设置 GHOSTPIN_TEST_SUPPORT_ROOT 时偏好写入该目录，不碰真实 UserDefaults。
+    static func liveDefaults() -> UserDefaults {
+        #if DEBUG
+        if let path = ProcessInfo.processInfo.environment["GHOSTPIN_TEST_SUPPORT_ROOT"], !path.isEmpty {
+            let plistPath = URL(fileURLWithPath: path, isDirectory: true)
+                .appendingPathComponent("preferences")
+                .path
+            if let isolated = UserDefaults(suiteName: plistPath) {
+                return isolated
+            }
+        }
+        #endif
+        return .standard
+    }
+
     private func saveHudModeHotKeyShortcut() {
         guard let hudModeHotKeyShortcut,
               let data = try? JSONEncoder.ghostPin.encode(hudModeHotKeyShortcut) else {
@@ -134,6 +186,7 @@ final class AppPreferences: ObservableObject {
         static let keepBoardOnTop = "keepBoardOnTop"
         static let launchAtLogin = "launchAtLogin"
         static let hudMode = "hudMode"
+        static let hudInteractiveView = "hudInteractiveView"
         static let hudOpacity = "hudOpacity"
         static let hudPassthroughOpacity = "hudPassthroughOpacity"
         static let hudInteractiveOpacity = "hudInteractiveOpacity"
@@ -142,6 +195,7 @@ final class AppPreferences: ObservableObject {
         static let hudFocusDoing = "hudFocusDoing"
         static let hudAllSpaces = "hudAllSpaces"
         static let hudFrame = "hudFrame"
+        static let hudQuadrantsFrame = "hudQuadrantsFrame"
         static let hudModeHotKeyEnabled = "hudModeHotKeyEnabled"
         static let hudModeHotKeyShortcut = "hudModeHotKeyShortcut"
     }

@@ -9,7 +9,10 @@ struct DesktopNotesBoardView: View {
 
     static let defaultWidth: CGFloat = 380
     static let minimumSize = NSSize(width: 320, height: 144)
+    static let quadrantsDefaultSize = NSSize(width: 720, height: 592)
+    static let quadrantsMinimumSize = NSSize(width: 560, height: 320)
     private static let headerHeight: CGFloat = 39
+    private static let toolbarHeight: CGFloat = 40
     private static let footerHeight: CGFloat = 25
     private static let maximumBodyHeight: CGFloat = 396
     private static let emptyBodyHeight: CGFloat = 80
@@ -18,23 +21,39 @@ struct DesktopNotesBoardView: View {
     @State private var contentHeight: CGFloat = maximumBodyHeight
 
     var body: some View {
-        let projection = projection
-        let isEmpty = projection.doing.isEmpty && projection.todo.isEmpty
+        let view = appState.preferences.effectiveHudView
+        let listProjection = projection
+        let quadrantProjection = quadrantProjection
+        let isEmpty = listProjection.doing.isEmpty && listProjection.todo.isEmpty
+        let doingCount = view == .quadrants ? quadrantProjection.doingCount : listProjection.doingCount
+        let todoCount = view == .quadrants ? quadrantProjection.todoCount : listProjection.todoCount
+        let visibleCount = view == .quadrants
+            ? quadrantProjection.doingCount + quadrantProjection.todoCount
+            : listProjection.doing.count + listProjection.todo.count
 
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                header(projection)
+                header(doingCount: doingCount, todoCount: todoCount)
                     .frame(height: Self.headerHeight)
 
-                if isEmpty {
-                    emptyState
-                } else {
-                    taskList(projection, availableHeight: geometry.size.height - Self.headerHeight - Self.footerHeight)
+                if isInteractive {
+                    viewToolbar
+                        .frame(height: Self.toolbarHeight)
                 }
 
-                Spacer(minLength: 0)
+                boardBody(
+                    view,
+                    listProjection: listProjection,
+                    quadrantProjection: quadrantProjection,
+                    isEmpty: isEmpty,
+                    availableHeight: geometry.size.height - Self.headerHeight - Self.footerHeight - (isInteractive ? Self.toolbarHeight : 0)
+                )
 
-                footer(projection)
+                if view == .list {
+                    Spacer(minLength: 0)
+                }
+
+                footer(visibleCount: visibleCount, totalCount: doingCount + todoCount)
                     .frame(height: Self.footerHeight)
             }
         }
@@ -69,7 +88,196 @@ struct DesktopNotesBoardView: View {
         }
     }
 
-    private func header(_ projection: HudProjection) -> some View {
+    @ViewBuilder
+    private func boardBody(
+        _ view: HudView,
+        listProjection: HudProjection,
+        quadrantProjection: HudQuadrantProjection,
+        isEmpty: Bool,
+        availableHeight: CGFloat
+    ) -> some View {
+        if view == .quadrants {
+            quadrantGrid(quadrantProjection, height: max(0, availableHeight))
+        } else if isEmpty {
+            emptyState
+        } else {
+            taskList(listProjection, availableHeight: availableHeight)
+        }
+    }
+
+    private var viewToolbar: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 2) {
+                viewButton("单列", view: .list)
+                viewButton("四象限", view: .quadrants)
+            }
+            .padding(2)
+            .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("待办视图")
+
+            Spacer(minLength: 4)
+
+            Text("范围")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Picker("范围", selection: hudScopeBinding) {
+                Text("全部未完成").tag(HudScope.all)
+                Text("今天新增").tag(HudScope.today)
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .font(.system(size: 11))
+            .fixedSize()
+        }
+        .padding(.horizontal, 12)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(.primary.opacity(0.08))
+                .frame(height: 0.5)
+        }
+    }
+
+    private func viewButton(_ title: String, view: HudView) -> some View {
+        let selected = appState.preferences.hudInteractiveView == view
+        return Button {
+            appState.setHudInteractiveView(view)
+        } label: {
+            Text(title)
+                .font(.system(size: 11.5, weight: selected ? .semibold : .regular))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3)
+                .background(
+                    selected ? Color(nsColor: .windowBackgroundColor) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 5)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(selected ? .primary : .secondary)
+        .accessibilityLabel("\(title)视图")
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+
+    private var hudScopeBinding: Binding<HudScope> {
+        Binding(
+            get: { appState.preferences.hudScope },
+            set: { appState.preferences.hudScope = $0 }
+        )
+    }
+
+    private func quadrantGrid(_ projection: HudQuadrantProjection, height: CGFloat) -> some View {
+        let cellHeight = max(0, (height - 0.5) / 2)
+        return VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                quadrantCell(projection.cell(.importantUrgent))
+                quadrantSeparator(width: 0.5)
+                quadrantCell(projection.cell(.importantNotUrgent))
+            }
+            .frame(height: cellHeight)
+            quadrantSeparator(height: 0.5)
+            HStack(spacing: 0) {
+                quadrantCell(projection.cell(.generalUrgent))
+                quadrantSeparator(width: 0.5)
+                quadrantCell(projection.cell(.generalNotUrgent))
+            }
+            .frame(height: cellHeight)
+        }
+        .frame(height: height)
+    }
+
+    private func quadrantSeparator(width: CGFloat? = nil, height: CGFloat? = nil) -> some View {
+        Rectangle()
+            .fill(.primary.opacity(0.08))
+            .frame(width: width, height: height)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    private func quadrantCell(_ cell: HudQuadrantCell) -> some View {
+        VStack(spacing: 0) {
+            quadrantHeading(cell)
+            if cell.count == 0 {
+                quadrantEmptyState
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        if !cell.doing.isEmpty {
+                            taskSection("Doing", items: cell.doing, count: cell.doing.count, isDoing: true)
+                        }
+                        if !cell.todo.isEmpty {
+                            taskSection("Todo", items: cell.todo, count: cell.todo.count, isDoing: false)
+                        }
+                    }
+                    .padding(.bottom, 6)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func quadrantHeading(_ cell: HudQuadrantCell) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(quadrantTitle(cell.quadrant))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(cell.quadrant == .importantUrgent ? Color.red : Color.primary)
+                Text(quadrantSubtitle(cell.quadrant))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            Text("\(cell.count)")
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("\(cell.count) 个未完成任务")
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var quadrantEmptyState: some View {
+        VStack(spacing: 4) {
+            Text("暂无任务")
+                .font(.system(size: 12))
+            Text(appState.preferences.hudScope == .today ? "今天新增的任务中没有此类待办" : "符合分类的未完成任务会显示在这里")
+                .font(.system(size: 11))
+                .multilineTextAlignment(.center)
+        }
+        .foregroundStyle(.secondary)
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func quadrantTitle(_ quadrant: HudQuadrant) -> String {
+        switch quadrant {
+        case .importantUrgent:
+            return "优先处理"
+        case .importantNotUrgent:
+            return "安排时间"
+        case .generalUrgent:
+            return "及时处理"
+        case .generalNotUrgent:
+            return "稍后处理"
+        }
+    }
+
+    private func quadrantSubtitle(_ quadrant: HudQuadrant) -> String {
+        switch quadrant {
+        case .importantUrgent:
+            return "重要 · 紧急"
+        case .importantNotUrgent:
+            return "重要 · 不紧急"
+        case .generalUrgent:
+            return "一般 · 紧急"
+        case .generalNotUrgent:
+            return "一般 · 不紧急"
+        }
+    }
+
+    private func header(doingCount: Int, todoCount: Int) -> some View {
         HStack(spacing: 8) {
             GhostPinLogoMark(size: 21, isMuted: !isInteractive)
             Text("GhostPin")
@@ -77,7 +285,7 @@ struct DesktopNotesBoardView: View {
 
             Spacer(minLength: 4)
 
-            Text("Doing \(projection.doingCount) · Todo \(projection.todoCount)")
+            Text("Doing \(doingCount) · Todo \(todoCount)")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -182,7 +390,7 @@ struct DesktopNotesBoardView: View {
         }
     }
 
-    private func footer(_ projection: HudProjection) -> some View {
+    private func footer(visibleCount: Int, totalCount: Int) -> some View {
         HStack(spacing: 8) {
             HStack(spacing: 5) {
                 Circle()
@@ -194,7 +402,7 @@ struct DesktopNotesBoardView: View {
 
             Spacer(minLength: 4)
 
-            Text("\(projection.doing.count + projection.todo.count) / \(projection.doingCount + projection.todoCount)")
+            Text("\(visibleCount) / \(totalCount)")
             Text(appState.preferences.hudScope == .all ? "全部" : "今天新增")
 
             if appState.preferences.hudModeHotKeyEnabled,
@@ -235,6 +443,10 @@ struct DesktopNotesBoardView: View {
             maxCount: appState.preferences.hudMaxItems,
             focusDoing: appState.preferences.hudFocusDoing
         )
+    }
+
+    private var quadrantProjection: HudQuadrantProjection {
+        appState.todoStore.hudQuadrantProjection(scope: appState.preferences.hudScope)
     }
 
     private var isInteractive: Bool {

@@ -86,6 +86,14 @@ let checks: [Check] = [
     ("TodoStore.hudProjection shows both sections when focus is disabled", checkHudProjectionDisabledShowsBothSections),
     ("TodoStore.hudProjection applies maxCount to rendered items only", checkHudProjectionLimitAppliesToRenderedItems),
     ("TodoStore.hudProjection counts sections independently of the limit", checkHudProjectionCountsAreIndependent),
+    ("TodoStore.hudQuadrantProjection classifies four combinations", checkHudQuadrantClassifiesFourCombinations),
+    ("TodoStore.hudQuadrantProjection urgency uses next-day boundary", checkHudQuadrantUrgencyBoundaries),
+    ("TodoStore.hudQuadrantProjection ignores list limit and focus", checkHudQuadrantTodayScopeIgnoresListRules),
+    ("TodoStore.hudQuadrantProjection keeps Doing before Todo and list order", checkHudQuadrantDoingBeforeTodoKeepsListOrder),
+    ("TodoStore.hudQuadrantProjection removes completed and updates counts", checkHudQuadrantCompletionRemovesAndCountsUpdate),
+    ("TodoStore.hudQuadrantProjection reclassifies across midnight", checkHudQuadrantDayRollover),
+    ("TodoStore.hudQuadrantProjection follows priority and due updates", checkHudQuadrantUpdateMovesCell),
+    ("TodoStore.hudQuadrantProjection keeps four empty cells when empty", checkHudQuadrantEmptyProjection),
     ("TodoStore sorts open items by priority then due date", checkSortsOpenItemsByPriorityThenDueDate),
     ("TodoStore sinks overdue items to bottom", checkSortsOverdueItemsToBottom),
     ("TodoStore sorts items without due date after those with", checkSortsItemsWithoutDueDateLast),
@@ -1394,4 +1402,191 @@ func makeDate(year: Int, month: Int, day: Int, hour: Int, minute: Int) -> Date {
         minute: minute
     )
     return checkCalendar.date(from: components)!
+}
+
+func checkHudQuadrantClassifiesFourCombinations() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let first = try require(try store.add(title: "高-今天", group: "默认", priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0)), "应创建")
+    let second = try require(try store.add(title: "高-无截止", group: "默认", priority: .high), "应创建")
+    let third = try require(try store.add(title: "中-已逾期", group: "默认", priority: .medium, dueAt: makeDate(year: 2026, month: 6, day: 14, hour: 10, minute: 0)), "应创建")
+    let fourth = try require(try store.add(title: "低-明天", group: "默认", priority: .low, dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 9, minute: 0)), "应创建")
+
+    let projection = store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar)
+    try check(projection.cell(.importantUrgent).todo.map(\.id) == [first.id], "高优先级今天到期应在优先处理")
+    try check(projection.cell(.importantNotUrgent).todo.map(\.id) == [second.id], "高优先级无截止应在安排时间")
+    try check(projection.cell(.generalUrgent).todo.map(\.id) == [third.id], "中优先级已逾期应在及时处理")
+    try check(projection.cell(.generalNotUrgent).todo.map(\.id) == [fourth.id], "低优先级明天到期应在稍后处理")
+    let allIDs = projection.cells.flatMap { $0.doing + $0.todo }.map(\.id)
+    try check(allIDs.count == 4 && Set(allIDs).count == 4, "每条任务应恰好出现一次")
+    try check(projection.doingCount + projection.todoCount == store.openItems(now: now).count, "四象限总数应等于范围内未完成数")
+}
+
+func checkHudQuadrantUrgencyBoundaries() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let overdue = try require(try store.add(title: "已逾期", group: "默认", dueAt: makeDate(year: 2026, month: 6, day: 14, hour: 23, minute: 59)), "应创建")
+    let todayEnd = try require(try store.add(title: "今天末尾", group: "默认", dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 23, minute: 59)), "应创建")
+    let nextMidnight = try require(try store.add(title: "次日零点", group: "默认", dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 0, minute: 0)), "应创建")
+    let noDue = try require(try store.add(title: "无截止", group: "默认"), "应创建")
+
+    let projection = store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar)
+    let urgentIDs = Set((projection.cell(.generalUrgent).todo + projection.cell(.importantUrgent).todo).map(\.id))
+    let notUrgentIDs = Set((projection.cell(.generalNotUrgent).todo + projection.cell(.importantNotUrgent).todo).map(\.id))
+    try check(urgentIDs == Set([overdue.id, todayEnd.id]), "已逾期与今天末尾应为紧急，实际: \(urgentIDs)")
+    try check(notUrgentIDs == Set([nextMidnight.id, noDue.id]), "次日零点与无截止应为不紧急，实际: \(notUrgentIDs)")
+}
+
+func checkHudQuadrantTodayScopeIgnoresListRules() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    var todayIDs: [Int64] = []
+    for index in 0..<6 {
+        let item = try require(
+            try store.add(title: "今天\(index)", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 1, minute: index), priority: .high),
+            "应创建"
+        )
+        todayIDs.append(item.id)
+        if index < 2 {
+            _ = try store.setStatus(item.id, status: .doing, at: now)
+        }
+    }
+    _ = try require(
+        try store.add(title: "昨天任务", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 14, hour: 23, minute: 59), priority: .high),
+        "应创建"
+    )
+
+    // 列表上限 3 且聚焦开启；四象限必须仍展示今天全部 6 条。
+    let projection = store.hudQuadrantProjection(scope: .today, now: now, calendar: checkCalendar)
+    let cell = projection.cell(.importantNotUrgent)
+    try check(cell.count == 6, "同格应容纳全部 6 条，实际: \(cell.count)")
+    try check(cell.doing.count == 2 && cell.todo.count == 4, "格内应按状态分区")
+    try check(Set((cell.doing + cell.todo).map(\.id)) == Set(todayIDs), "昨天创建的任务不计入任何象限")
+    for quadrant in [HudQuadrant.importantUrgent, .generalUrgent, .generalNotUrgent] {
+        try check(projection.cell(quadrant).count == 0, "其他三格应为空")
+    }
+    try check(projection.doingCount == 2 && projection.todoCount == 4, "头部计数应为范围内完整计数")
+
+    let list = store.hudProjection(scope: .today, maxCount: 3, focusDoing: true, now: now, calendar: checkCalendar)
+    try check(list.doing.count == 2 && list.todo.isEmpty, "列表仍应聚焦 Doing 并受上限约束")
+}
+
+func checkHudQuadrantDoingBeforeTodoKeepsListOrder() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let doingLow = try require(
+        try store.add(title: "Doing-低", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 9, minute: 0), priority: .low),
+        "应创建"
+    )
+    _ = try store.setStatus(doingLow.id, status: .doing, at: now)
+    let todoMedium = try require(
+        try store.add(title: "Todo-中", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 10, minute: 30), priority: .medium),
+        "应创建"
+    )
+    let todoHighOld = try require(
+        try store.add(title: "Todo-高-早", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 10, minute: 0), priority: .high),
+        "应创建"
+    )
+    let todoHighNew = try require(
+        try store.add(title: "Todo-高-晚", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 11, minute: 0), priority: .high),
+        "应创建"
+    )
+
+    let projection = store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar)
+    let cell = projection.cell(.generalNotUrgent)
+    try check(cell.doing.map(\.id) == [doingLow.id], "同格低优先级 Doing 应在 Doing 分区")
+    try check(cell.todo.map(\.id) == [todoMedium.id], "同格中优先级 Todo 应在 Todo 分区")
+    try check((cell.doing + cell.todo).map(\.id) == [doingLow.id, todoMedium.id], "同格 Doing 应排在 Todo 前面")
+    let todoCell = projection.cell(.importantNotUrgent)
+    try check(todoCell.todo.map(\.id) == [todoHighNew.id, todoHighOld.id], "同状态应沿用列表排序（新任务在前）")
+    let list = store.hudProjection(scope: .all, maxCount: 10, focusDoing: false, now: now, calendar: checkCalendar)
+    try check(list.doing.map(\.id) == cell.doing.map(\.id), "Doing 分区应与列表一致")
+    try check(list.todo.map(\.id) == [todoHighNew.id, todoHighOld.id, todoMedium.id], "列表 Todo 排序应保持既有规则")
+}
+
+func checkHudQuadrantCompletionRemovesAndCountsUpdate() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let item = try require(try store.add(title: "推进任务", group: "默认", priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0)), "应创建")
+    let other = try require(try store.add(title: "保留任务", group: "默认", priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 19, minute: 0)), "应创建")
+
+    _ = try store.advanceStatus(item.id, at: now)
+    let afterStart = store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar)
+    let startedCell = afterStart.cell(.importantUrgent)
+    try check(startedCell.doing.map(\.id) == [item.id] && startedCell.todo.map(\.id) == [other.id], "第一次推进只改变格内分区")
+    try check(startedCell.count == 2 && afterStart.doingCount == 1 && afterStart.todoCount == 1, "格内计数与头部计数应同步")
+
+    _ = try store.advanceStatus(item.id, at: now)
+    let afterDone = store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar)
+    let doneCell = afterDone.cell(.importantUrgent)
+    try check(doneCell.doing.isEmpty && doneCell.todo.map(\.id) == [other.id], "完成后应从该格移除")
+    try check(doneCell.count == 1 && afterDone.doingCount == 0 && afterDone.todoCount == 1, "完成后计数应同步更新")
+}
+
+func checkHudQuadrantDayRollover() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let beforeMidnight = makeDate(year: 2026, month: 6, day: 15, hour: 23, minute: 59)
+    let afterMidnight = makeDate(year: 2026, month: 6, day: 16, hour: 0, minute: 0)
+
+    let item = try require(
+        try store.add(title: "次日零点到期", group: "默认", createdAt: beforeMidnight, priority: .high, dueAt: afterMidnight),
+        "应创建"
+    )
+
+    let before = store.hudQuadrantProjection(scope: .all, now: beforeMidnight, calendar: checkCalendar)
+    try check(before.cell(.importantNotUrgent).todo.map(\.id) == [item.id], "跨日前应为不紧急")
+    let after = store.hudQuadrantProjection(scope: .all, now: afterMidnight, calendar: checkCalendar)
+    try check(after.cell(.importantUrgent).todo.map(\.id) == [item.id], "进入到期日后应为紧急")
+
+    let todayBefore = store.hudQuadrantProjection(scope: .today, now: beforeMidnight, calendar: checkCalendar)
+    try check(todayBefore.todoCount == 1, "跨日前应属于今天新增")
+    let todayAfter = store.hudQuadrantProjection(scope: .today, now: afterMidnight, calendar: checkCalendar)
+    try check(todayAfter.todoCount == 0, "跨日后不再属于今天新增")
+}
+
+func checkHudQuadrantUpdateMovesCell() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let item = try require(try store.add(title: "可变任务", group: "默认", priority: .high), "应创建")
+    try check(store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar).cell(.importantNotUrgent).todo.map(\.id) == [item.id], "初始应在安排时间")
+
+    // CLI 的优先级与截止时间修改走同一 store.update 路径。
+    _ = try store.update(item.id, priority: .low, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 20, minute: 0))
+    try check(store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar).cell(.generalUrgent).todo.map(\.id) == [item.id], "降优先级并设今天截止后应在及时处理")
+
+    _ = try store.update(item.id, clearDue: true)
+    try check(store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar).cell(.generalNotUrgent).todo.map(\.id) == [item.id], "清除截止后应在稍后处理")
+}
+
+func checkHudQuadrantEmptyProjection() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let projection = store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar)
+    try check(projection.cells.count == 4, "空状态应保留四个象限")
+    try check(projection.cells.allSatisfy { $0.count == 0 }, "空格计数应为零")
+    try check(projection.doingCount == 0 && projection.todoCount == 0, "空状态头部计数应为零")
+    try check(projection.cells.map(\.quadrant) == HudQuadrant.allCases, "象限顺序应固定")
 }

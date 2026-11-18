@@ -1,7 +1,11 @@
+import AppKit
 import Combine
 import Foundation
+import OSLog
 import SwiftUI
 import GhostPinCore
+
+private let hudLogger = Logger(subsystem: "com.oyuxi.TodoPin", category: "HUD")
 
 @MainActor
 final class AppState: ObservableObject {
@@ -23,6 +27,8 @@ final class AppState: ObservableObject {
         notificationService: notificationService
     )
     private var cancellables: Set<AnyCancellable> = []
+    private var dayChangeObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
     private var statusClickTimes: [TodoItem.ID: UInt64] = [:]
 
     private let statusClickCooldownNanoseconds: UInt64 = 500_000_000
@@ -55,7 +61,7 @@ final class AppState: ObservableObject {
 
         self.todosURL = resolvedTodosURL
         self.todoStore = TodoStore(fileURL: resolvedTodosURL, legacyFileURL: legacyTodosURL, fileManager: fileManager)
-        self.preferences = AppPreferences()
+        self.preferences = AppPreferences(defaults: AppPreferences.liveDefaults())
         self.hotKeySetupState = preferences.hudModeHotKeyEnabled ? .pendingConfiguration : .disabled
 
         if let storageResolutionError {
@@ -99,12 +105,39 @@ final class AppState: ObservableObject {
         }
         hotKeyService = service
         restoreHotKeyRegistration()
+
+        // 跨日与唤醒后重算「今天新增」和紧急程度；投影在渲染时取当前时间。
+        let refresh: @Sendable (Notification) -> Void = { [weak self] _ in
+            Task { @MainActor in
+                self?.objectWillChange.send()
+            }
+        }
+        dayChangeObserver = NotificationCenter.default.addObserver(
+            forName: .NSCalendarDayChanged,
+            object: nil,
+            queue: .main,
+            using: refresh
+        )
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main,
+            using: refresh
+        )
     }
 
     func stop() {
         reminderService.stop()
         todoFileWatcher?.stop()
         hotKeyService?.unregister()
+        if let dayChangeObserver {
+            NotificationCenter.default.removeObserver(dayChangeObserver)
+        }
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+        }
+        dayChangeObserver = nil
+        wakeObserver = nil
     }
 
     func showBoard() {
@@ -121,8 +154,19 @@ final class AppState: ObservableObject {
 
     func toggleHUDMode() {
         preferences.hudMode = preferences.hudMode == .interactive ? .passthrough : .interactive
+        hudLogger.info("toggleHUDMode mode=\(self.preferences.hudMode.rawValue, privacy: .public) view=\(self.preferences.effectiveHudView.rawValue, privacy: .public)")
         windowCoordinator.updateHUD()
         windowCoordinator.applyHUDInteraction()
+    }
+
+    /// 交互模式下主动选择视图；穿透模式不提供切换入口。
+    func setHudInteractiveView(_ view: HudView) {
+        guard preferences.hudMode == .interactive, preferences.hudInteractiveView != view else {
+            return
+        }
+        preferences.hudInteractiveView = view
+        hudLogger.info("setHudInteractiveView view=\(view.rawValue, privacy: .public)")
+        windowCoordinator.updateHUD()
     }
 
     func updateHUD() {
