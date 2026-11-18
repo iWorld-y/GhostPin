@@ -110,6 +110,8 @@ let checks: [Check] = [
     ("HudFrameGeometry collapse handles multi-screen negative coordinates", checkHudSnapMultiScreenNegativeCoords),
     ("HudFrameGeometry restoring quadrants recovers pre-collapse frame", checkHudSnapRestoreQuadrantsFrame),
     ("HudFrameGeometry manual switch does not snap to edge", checkHudSnapManualSwitchDoesNotSnap),
+    ("HudFrameGeometry collapse content-fit re-aligns bottom edge and persists", checkHudCollapseContentFitRealignsBottom),
+    ("HudFrameGeometry collapse content-fit keeps left edge aligned", checkHudCollapseContentFitLeftEdge),
     ("TodoStore sorts open items by priority then due date", checkSortsOpenItemsByPriorityThenDueDate),
     ("TodoStore sinks overdue items to bottom", checkSortsOverdueItemsToBottom),
     ("TodoStore sorts items without due date after those with", checkSortsItemsWithoutDueDateLast),
@@ -1865,4 +1867,37 @@ func checkHudSnapManualSwitchDoesNotSnap() throws {
     // 同一窗口自动收起则会吸边（此处最近为上边），形成对照。
     let collapsed = HudFrameGeometry.collapsedListFrame(current: current, targetSize: listSize, screens: [a], main: a)
     try check(collapsed.maxY == 1080 && manual.maxY != 1080, "自动收起应吸边而手动不应，实际: \(collapsed)")
+}
+
+func checkHudCollapseContentFitRealignsBottom() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    // 无历史列表尺寸：四象限近底收起用默认 460 高贴底。
+    let quadrants = CGRect(x: 600, y: 30, width: 720, height: 592)
+    try check(HudFrameGeometry.nearestSnapEdge(frame: quadrants, visible: a.visibleFrame) == .bottom, "近底应选下边")
+    let collapsed = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: 460), screens: [a], main: a)
+    try check(collapsed.minY == 25 && collapsed.height == 460, "收起应以 460 高贴底，实际: \(collapsed)")
+
+    // 内容适配实测 144：最终尺寸确定后应沿下边重对齐，底边不离开 visibleFrame.minY。
+    let fitted = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 144, snapEdge: .bottom, screens: [a], main: a)
+    try check(fitted.height == 144 && fitted.minY == 25, "内容适配后应仍贴底，实际: \(fitted)")
+
+    // 持久化与重启：最终 frame 高度 144、底边位置保留。
+    let persisted = HudFrameGeometry.persistedListFrame(actual: fitted, baseHeight: 144)
+    try check(persisted.height == 144 && persisted.minY == 25, "应持久化最终贴底 frame")
+    let restarted = HudFrameGeometry.restoredFrame(persisted, screens: [a], main: a)
+    try check(restarted.minY == 25 && restarted.height == 144, "重启应恢复贴底位置，实际: \(restarted)")
+
+    // 对照：无贴边状态（手动）不重对齐，收缩后底边上移——证明重对齐仅作用于收起。
+    let manual = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 144, snapEdge: nil, screens: [a], main: a)
+    try check(manual.minY == 341 && manual.minY != 25, "手动/无贴边状态不应吸底，实际: \(manual)")
+}
+
+func checkHudCollapseContentFitLeftEdge() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let quadrants = CGRect(x: 10, y: 300, width: 720, height: 592)
+    try check(HudFrameGeometry.nearestSnapEdge(frame: quadrants, visible: a.visibleFrame) == .left, "近左应选左边")
+    let collapsed = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: 460), screens: [a], main: a)
+    try check(collapsed.minX == 0, "收起应贴左")
+    let fitted = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 144, snapEdge: .left, screens: [a], main: a)
+    try check(fitted.height == 144 && fitted.minX == 0 && rectContains(a.visibleFrame, fitted), "内容适配后应仍贴左并夹取，实际: \(fitted)")
 }

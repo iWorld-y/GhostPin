@@ -156,6 +156,22 @@ public enum HudFrameGeometry {
         let edge = nearestSnapEdge(frame: current, visible: screen.visibleFrame)
         return snappedFrame(frame: listFrame, edge: edge, visible: screen.visibleFrame)
     }
+
+    /// 内容适配确定最终高度后的列表 frame：先按左上角锚定收缩到最终高度，
+    /// 若收起时选了贴边则沿该边重新对齐并夹取（避免收缩后底边离开所选边缘）；无贴边状态则不吸边。
+    public static func contentFittedListFrame(current: CGRect, finalHeight: CGFloat, snapEdge: HudSnapEdge?, screens: [HudScreen], main: HudScreen?) -> CGRect {
+        var frame = CGRect(
+            origin: CGPoint(x: current.minX, y: current.maxY - finalHeight),
+            size: CGSize(width: current.width, height: finalHeight)
+        )
+        if let snapEdge {
+            let screen = bestScreenIndex(for: frame, screens: screens).map { screens[$0] } ?? main
+            if let screen {
+                frame = snappedFrame(frame: frame, edge: snapEdge, visible: screen.visibleFrame)
+            }
+        }
+        return frame
+    }
 }
 
 /// HUD 收起贴边的可选边缘。

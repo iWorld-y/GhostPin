@@ -19,6 +19,8 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     private var listBaseHeight: CGFloat?
     /// 上一次 updateHUD 时的 HUD 模式，用于区分「收起后恢复四象限」与手动视图切换。
     private var lastHudMode: HudMode = .passthrough
+    /// 收起时所选贴边（仅无历史列表尺寸、待内容适配时暂存）；最终尺寸确定后消费，手动切换/重新展开/用户调整时清除。
+    private var pendingSnapEdge: HudSnapEdge?
 
     var isBoardVisible: Bool {
         boardWindow?.isVisible == true
@@ -105,9 +107,15 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         let minHeight = minimumSize(for: .list, interactive: appState.preferences.hudMode == .interactive).height
         let height = max(height, minHeight)
         listBaseHeight = height
-        var frame = boardWindow.frame
-        frame.origin.y += frame.height - height
-        frame.size.height = height
+        // 最终尺寸确定后沿收起所选边重新对齐并夹取，避免收缩后脱离边缘。
+        let frame = HudFrameGeometry.contentFittedListFrame(
+            current: boardWindow.frame,
+            finalHeight: height,
+            snapEdge: pendingSnapEdge,
+            screens: Self.hudScreens(),
+            main: Self.mainHudScreen()
+        )
+        pendingSnapEdge = nil
         isSwitchingLayout = true
         boardWindow.setFrame(frame, display: true)
         isSwitchingLayout = false
@@ -170,6 +178,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         let restoringCollapsedQuadrants = currentLayout == .list && target == .quadrants && mode == .interactive && lastHudMode == .passthrough
         currentLayout = target
         needsInitialHUDHeight = false
+        pendingSnapEdge = nil
 
         let saved = framePreference(for: target)
         var size = saved.map { NSSize(width: $0.width, height: $0.height) } ?? defaultSize(for: target)
@@ -189,6 +198,10 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
                 screens: Self.hudScreens(),
                 main: Self.mainHudScreen()
             )
+            // 无历史列表尺寸时随后会内容适配，暂存所选边以便最终尺寸确定后重对齐。
+            if saved == nil, let screen = Self.screen(for: oldFrame) {
+                pendingSnapEdge = HudFrameGeometry.nearestSnapEdge(frame: oldFrame, visible: screen.visibleFrame)
+            }
         } else if restoringCollapsedQuadrants, let saved {
             frame = HudFrameGeometry.restoredFrame(saved.nsRect, screens: Self.hudScreens(), main: Self.mainHudScreen())
         } else {
@@ -270,6 +283,14 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         NSScreen.main.map { HudScreen(frame: $0.frame, visibleFrame: $0.visibleFrame) }
     }
 
+    private static func screen(for frame: CGRect) -> HudScreen? {
+        let screens = hudScreens()
+        if let index = HudFrameGeometry.bestScreenIndex(for: frame, screens: screens) {
+            return screens[index]
+        }
+        return mainHudScreen()
+    }
+
     /// 目标不透明度：穿透模式下指针位于 HUD 内即完全不可见，其余情况用偏好值。
     private func targetHUDAlpha() -> CGFloat {
         guard let appState else {
@@ -320,11 +341,13 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
 
     func windowDidMove(_ notification: Notification) {
         guard !isSwitchingLayout else { return }
+        pendingSnapEdge = nil
         saveBoardFrame()
     }
 
     func windowDidResize(_ notification: Notification) {
         guard !isSwitchingLayout, let appState, let boardWindow else { return }
+        pendingSnapEdge = nil
         if currentLayout == .list {
             // 仅当高度偏离当前显示高度时才视为用户真实调高；仅调宽/程序化显示保留基准。
             listBaseHeight = HudFrameGeometry.updatedListBaseHeight(

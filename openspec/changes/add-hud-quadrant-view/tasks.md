@@ -32,3 +32,5 @@
 - [ ] 3.2 在隔离数据中从 CLI 更新任务优先级、截止时间与状态。核对四象限位置、计数和列表聚焦，分别从交互和穿透模式重启并核对恢复结果。
 
 复核修复（第五轮·收起自动贴边）：用户试用反馈四象限切穿透后仍停屏幕内侧遮挡工作。新增仅交互四象限→穿透列表的自动贴边：Core `HudFrameGeometry.edgeGaps/nearestSnapEdge/snappedFrame/collapsedListFrame`，以收起前窗口四边间距选最近边（碰边算零、平局 left/right/bottom/top 优先左右），所选轴贴边、另一轴保持原位置并夹取、保持列表尺寸。协调器以 `lastHudMode` 区分收起后恢复四象限（还原收起前 frame，显示器变化夹取）与手动切换（不吸边）；穿透重启恢复收起后列表位置。视图偏好与基准高度保留。新增 5 项纯几何回归（四边/平局/多屏负坐标/切回四象限/手动不吸边）。`make test` 73/73、`check_cli.py` 通过；独立 `.build` 构建 + 隔离 plist 启动证实穿透重启还原边缘位置、交互四象限启动精确还原收起前 frame。未覆盖 dist 试用 bundle、未打断用户进程（无 pkill）、未采集屏幕/枚举窗口/注入输入。贴边转换的实机往返需用户桌面确认（无输入权限）；人工验收项仍保留。
+
+复核修复（第六轮·收起后内容适配脱离贴边）：无历史列表尺寸并从四象限收起时，applyHudLayout 用默认 460 高贴底并置 needsInitialHUDHeight；随后内容适配 applyInitialHUDHeight 固定旧 frame.maxY 收缩，使底边离开 visibleFrame.minY（460→144 底部多出 316pt）并持久化错误位置。修复：新增 Core `contentFittedListFrame`（先左上角锚定收缩到最终高度，再沿收起所选边重对齐并夹取）；协调器以 `pendingSnapEdge` 暂存收起所选边（仅无历史尺寸时），applyInitialHUDHeight 消费后清除，任何布局切换（手动/重新展开）与用户移动/缩放也清除。保留内容适配，保存最终 frame。新增 2 项无屏幕回归（收起→实测内容高度→持久化→重启：近底/无历史尺寸/左缘，及手动 nil 不吸边对照）。`make test` 75/75、`check_cli.py` 通过；隔离启动证实内容适配路径存活且持久化正确。未覆盖 dist/未打断试用进程/未截屏/未注入输入。收起→内容适配实机往返需用户桌面确认；人工验收项仍保留。
