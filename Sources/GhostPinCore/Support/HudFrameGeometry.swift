@@ -67,4 +67,27 @@ public enum HudFrameGeometry {
         }
         return frame
     }
+
+    /// 列表在目标模式下的有效高度：交互不小于交互最小值，穿透沿用基准高度。
+    /// 基准高度取持久化的列表尺寸（用户主动调整或内容适配），临时增高不写回，
+    /// 因此反向切换能还原紧凑高度，而用户调高的尺寸得以保留。
+    public static func listHeight(baseHeight: CGFloat, interactive: Bool, interactiveMinimum: CGFloat, passthroughMinimum: CGFloat) -> CGFloat {
+        max(baseHeight, interactive ? interactiveMinimum : passthroughMinimum)
+    }
+
+    /// 列表模式切换的目标 frame：以有效高度保留当前左上角，并夹取进当前屏可用区。
+    public static func listModeFrame(current: CGRect, baseHeight: CGFloat, interactive: Bool, interactiveMinimum: CGFloat, passthroughMinimum: CGFloat, screens: [HudScreen], main: HudScreen?) -> CGRect {
+        let targetHeight = listHeight(baseHeight: baseHeight, interactive: interactive, interactiveMinimum: interactiveMinimum, passthroughMinimum: passthroughMinimum)
+        let frame = CGRect(
+            origin: CGPoint(x: current.minX, y: current.maxY - targetHeight),
+            size: CGSize(width: current.width, height: targetHeight)
+        )
+        if let index = bestScreenIndex(for: current, screens: screens) {
+            return clamped(frame, into: screens[index].visibleFrame)
+        }
+        if let main {
+            return clamped(frame, into: main.visibleFrame)
+        }
+        return frame
+    }
 }

@@ -100,6 +100,10 @@ let checks: [Check] = [
     ("HudFrameGeometry.restoredFrame picks the best-intersecting screen", checkHudFrameRestoredPicksBestScreen),
     ("HudFrameGeometry.switchedFrame keeps top-left on the current screen", checkHudFrameSwitchKeepsTopLeft),
     ("HudFrameGeometry.switchedFrame shrinks oversized target into view", checkHudFrameSwitchShrinksOversizedTarget),
+    ("HudFrameGeometry.listModeFrame round-trips 144-184-144", checkHudListModeHeightRoundTrip),
+    ("HudFrameGeometry.listModeFrame respects user-resized height", checkHudListModeRespectsUserResize),
+    ("HudFrameGeometry.listModeFrame clamps growth at screen bottom", checkHudListModeBottomEdgeClamp),
+    ("HudFrameGeometry.listHeight raises saved compact size for interactive", checkHudListModeSavedOldSizeRestore),
     ("TodoStore sorts open items by priority then due date", checkSortsOpenItemsByPriorityThenDueDate),
     ("TodoStore sinks overdue items to bottom", checkSortsOverdueItemsToBottom),
     ("TodoStore sorts items without due date after those with", checkSortsItemsWithoutDueDateLast),
@@ -1658,4 +1662,55 @@ func checkHudFrameSwitchShrinksOversizedTarget() throws {
     let switched = HudFrameGeometry.switchedFrame(current: current, targetSize: CGSize(width: 900, height: 700), screens: [small], main: small)
     try check(rectContains(small.visibleFrame, switched), "超尺寸目标应缩小并夹取，实际: \(switched)")
     try check(switched.width == 800 && switched.height == 600, "尺寸应缩到可用区上限")
+}
+
+func checkHudListModeHeightRoundTrip() throws {
+    let screen = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let base: CGFloat = 144
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 184, "交互应抬到 184")
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 144, "穿透应沿用 144")
+
+    let passthrough = CGRect(x: 100, y: 400, width: 380, height: 144)
+    let interactive = HudFrameGeometry.listModeFrame(current: passthrough, baseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    try check(interactive.height == 184 && interactive.origin == CGPoint(x: 100, y: 360), "144→184 应保留左上角，实际: \(interactive)")
+    let restored = HudFrameGeometry.listModeFrame(current: interactive, baseHeight: base, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    try check(restored == passthrough, "184→144 应还原原 frame，实际: \(restored)")
+}
+
+func checkHudListModeRespectsUserResize() throws {
+    let screen = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let userHeight: CGFloat = 300
+    let current = CGRect(x: 100, y: 400, width: 380, height: userHeight)
+    try check(HudFrameGeometry.listHeight(baseHeight: userHeight, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "交互应保留用户 300")
+    try check(HudFrameGeometry.listHeight(baseHeight: userHeight, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "穿透应保留用户 300")
+    let interactive = HudFrameGeometry.listModeFrame(current: current, baseHeight: userHeight, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    let passthrough = HudFrameGeometry.listModeFrame(current: current, baseHeight: userHeight, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    try check(interactive == current && passthrough == current, "已足够高的用户尺寸两种模式都应保持")
+}
+
+func checkHudListModeBottomEdgeClamp() throws {
+    let screen = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    // 贴底：窗口底边就在可用区下缘，增高后左上角锚定会使底边越界，必须夹取。
+    let atBottom = CGRect(x: 100, y: 25, width: 380, height: 144)
+    let grown = HudFrameGeometry.listModeFrame(current: atBottom, baseHeight: 144, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    try check(rectContains(screen.visibleFrame, grown), "贴底增高应夹取进可用区，实际: \(grown)")
+    try check(grown.height == 184 && grown.minY == 25 && grown.minX == 100, "应增高到 184 并贴齐下缘")
+
+    // 有足够空间：保留左上角，不移动。
+    let withRoom = CGRect(x: 100, y: 400, width: 380, height: 144)
+    let free = HudFrameGeometry.listModeFrame(current: withRoom, baseHeight: 144, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    try check(free.origin == CGPoint(x: 100, y: 360) && free.maxY == withRoom.maxY, "空间充足应保留左上角")
+}
+
+func checkHudListModeSavedOldSizeRestore() throws {
+    // 启动恢复/四象限→交互列表：旧的 144 列表尺寸应先按交互最小值抬到 184 再夹取。
+    try check(HudFrameGeometry.listHeight(baseHeight: 144, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 184, "旧 144 交互应算为 184")
+    try check(HudFrameGeometry.listHeight(baseHeight: 300, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "旧 300 交互不应被压低")
+    try check(HudFrameGeometry.listHeight(baseHeight: 144, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 144, "旧 144 穿透应保持 144")
+
+    // 反向切换：临时增高到 184 后，以持久化基准 144 还原。
+    let screen = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let transient = CGRect(x: 100, y: 360, width: 380, height: 184)
+    let restored = HudFrameGeometry.listModeFrame(current: transient, baseHeight: 144, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    try check(restored.height == 144 && restored.origin == CGPoint(x: 100, y: 400), "应还原保存的旧 144 尺寸，实际: \(restored)")
 }

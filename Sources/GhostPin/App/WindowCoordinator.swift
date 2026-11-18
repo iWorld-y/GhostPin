@@ -33,6 +33,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             let view = appState.preferences.effectiveHudView
             currentLayout = view
             let savedFrame = framePreference(for: view)
+            let interactive = appState.preferences.hudMode == .interactive
             let defaultSize = view == .quadrants
                 ? DesktopNotesBoardView.quadrantsDefaultSize
                 : NSSize(width: DesktopNotesBoardView.defaultWidth, height: 460)
@@ -48,10 +49,20 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             window.backgroundColor = .clear
             window.isMovableByWindowBackground = true
             window.hidesOnDeactivate = false
-            window.minSize = minimumSize(for: view, interactive: appState.preferences.hudMode == .interactive)
+            window.minSize = minimumSize(for: view, interactive: interactive)
             if let savedFrame {
+                var rect = savedFrame.nsRect
+                if view == .list {
+                    // 交互列表遇到旧的紧凑尺寸时，先按交互最小值算出目标高度再夹取。
+                    rect.size.height = HudFrameGeometry.listHeight(
+                        baseHeight: rect.height,
+                        interactive: interactive,
+                        interactiveMinimum: DesktopNotesBoardView.interactiveMinimumSize.height,
+                        passthroughMinimum: DesktopNotesBoardView.minimumSize.height
+                    )
+                }
                 window.setFrame(
-                    HudFrameGeometry.restoredFrame(savedFrame.nsRect, screens: Self.hudScreens(), main: Self.mainHudScreen()),
+                    HudFrameGeometry.restoredFrame(rect, screens: Self.hudScreens(), main: Self.mainHudScreen()),
                     display: false
                 )
             } else {
@@ -146,7 +157,15 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         needsInitialHUDHeight = false
 
         let saved = framePreference(for: target)
-        let size = saved.map { NSSize(width: $0.width, height: $0.height) } ?? defaultSize(for: target)
+        var size = saved.map { NSSize(width: $0.width, height: $0.height) } ?? defaultSize(for: target)
+        if target == .list {
+            size.height = HudFrameGeometry.listHeight(
+                baseHeight: size.height,
+                interactive: appState.preferences.hudMode == .interactive,
+                interactiveMinimum: DesktopNotesBoardView.interactiveMinimumSize.height,
+                passthroughMinimum: DesktopNotesBoardView.minimumSize.height
+            )
+        }
         let frame = HudFrameGeometry.switchedFrame(
             current: oldFrame,
             targetSize: size,
@@ -166,26 +185,32 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         #endif
     }
 
-    /// 同一布局内模式变化（如穿透列表→交互列表）：保证交互工具栏与空状态有足够高度，
-    /// 不足时保留左上角增高；该增高不写回偏好，穿透仍恢复紧凑列表尺寸。
+    /// 同一布局内模式变化（穿透列表↔交互列表）：目标高度取持久化列表基准高度与模式最小值的较大者，
+    /// 交互保证工具栏/空状态高度，穿透还原紧凑高度；用户主动调高的尺寸保留。
+    /// 调整保留左上角并夹取进当前屏可用区，不写回偏好。
     private func applyHudModeMetrics() {
-        guard let appState, let boardWindow else {
+        guard let appState, let boardWindow, currentLayout == .list else {
             return
         }
         let interactive = appState.preferences.hudMode == .interactive
-        let required = minimumSize(for: currentLayout, interactive: interactive)
-        guard boardWindow.minSize != required else {
+        let required = minimumSize(for: .list, interactive: interactive)
+        let baseHeight = appState.preferences.hudFrame?.height ?? boardWindow.frame.height
+        let target = HudFrameGeometry.listModeFrame(
+            current: boardWindow.frame,
+            baseHeight: baseHeight,
+            interactive: interactive,
+            interactiveMinimum: DesktopNotesBoardView.interactiveMinimumSize.height,
+            passthroughMinimum: DesktopNotesBoardView.minimumSize.height,
+            screens: Self.hudScreens(),
+            main: Self.mainHudScreen()
+        )
+        guard boardWindow.minSize != required || boardWindow.frame != target else {
             return
         }
         isSwitchingLayout = true
         boardWindow.minSize = required
-        var frame = boardWindow.frame
-        if frame.height < required.height || frame.width < required.width {
-            let newHeight = max(frame.height, required.height)
-            frame.origin.y += frame.height - newHeight
-            frame.size.height = newHeight
-            frame.size.width = max(frame.width, required.width)
-            boardWindow.setFrame(frame, display: true)
+        if boardWindow.frame != target {
+            boardWindow.setFrame(target, display: true)
         }
         isSwitchingLayout = false
     }
