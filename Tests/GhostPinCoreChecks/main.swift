@@ -1,4 +1,5 @@
 import Combine
+import CoreGraphics
 import Foundation
 import GhostPinCore
 
@@ -94,6 +95,11 @@ let checks: [Check] = [
     ("TodoStore.hudQuadrantProjection reclassifies across midnight", checkHudQuadrantDayRollover),
     ("TodoStore.hudQuadrantProjection follows priority and due updates", checkHudQuadrantUpdateMovesCell),
     ("TodoStore.hudQuadrantProjection keeps four empty cells when empty", checkHudQuadrantEmptyProjection),
+    ("HudFrameGeometry.restoredFrame clamps partial overflow", checkHudFrameRestoredClampsPartialOverflow),
+    ("HudFrameGeometry.restoredFrame falls back to main when offscreen", checkHudFrameRestoredFallsBackToMain),
+    ("HudFrameGeometry.restoredFrame picks the best-intersecting screen", checkHudFrameRestoredPicksBestScreen),
+    ("HudFrameGeometry.switchedFrame keeps top-left on the current screen", checkHudFrameSwitchKeepsTopLeft),
+    ("HudFrameGeometry.switchedFrame shrinks oversized target into view", checkHudFrameSwitchShrinksOversizedTarget),
     ("TodoStore sorts open items by priority then due date", checkSortsOpenItemsByPriorityThenDueDate),
     ("TodoStore sinks overdue items to bottom", checkSortsOverdueItemsToBottom),
     ("TodoStore sorts items without due date after those with", checkSortsItemsWithoutDueDateLast),
@@ -1589,4 +1595,67 @@ func checkHudQuadrantEmptyProjection() throws {
     try check(projection.cells.allSatisfy { $0.count == 0 }, "空格计数应为零")
     try check(projection.doingCount == 0 && projection.todoCount == 0, "空状态头部计数应为零")
     try check(projection.cells.map(\.quadrant) == HudQuadrant.allCases, "象限顺序应固定")
+}
+
+private func hudScreen(_ frame: CGRect, visible: CGRect) -> HudScreen {
+    HudScreen(frame: frame, visibleFrame: visible)
+}
+
+private func rectContains(_ outer: CGRect, _ inner: CGRect) -> Bool {
+    inner.minX >= outer.minX && inner.minY >= outer.minY && inner.maxX <= outer.maxX && inner.maxY <= outer.maxY
+}
+
+func checkHudFrameRestoredClampsPartialOverflow() throws {
+    let screen = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    // 保存帧右侧与底部部分越界；仅相交会留下屏外部分，必须完整夹取。
+    let saved = CGRect(x: 1800, y: -100, width: 380, height: 460)
+    let restored = HudFrameGeometry.restoredFrame(saved, screens: [screen], main: screen)
+    try check(rectContains(screen.visibleFrame, restored), "部分越界应完整夹取进可用区，实际: \(restored)")
+    try check(restored.width == 380 && restored.height == 460, "尺寸可容纳时应保留")
+    try check(restored.maxX == screen.visibleFrame.maxX, "右侧应贴齐可用区边缘")
+    try check(restored.minY == screen.visibleFrame.minY, "底部应贴齐可用区边缘")
+}
+
+func checkHudFrameRestoredFallsBackToMain() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let b = hudScreen(CGRect(x: 1920, y: 0, width: 2560, height: 1440), visible: CGRect(x: 1920, y: 25, width: 2560, height: 1415))
+    let saved = CGRect(x: 9000, y: 9000, width: 380, height: 460)
+    let restored = HudFrameGeometry.restoredFrame(saved, screens: [a, b], main: a)
+    try check(rectContains(a.visibleFrame, restored), "完全屏外应回退主屏并夹取，实际: \(restored)")
+}
+
+func checkHudFrameRestoredPicksBestScreen() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let b = hudScreen(CGRect(x: 1920, y: 0, width: 2560, height: 1440), visible: CGRect(x: 1920, y: 25, width: 2560, height: 1415))
+    let saved = CGRect(x: 2000, y: 1300, width: 720, height: 592)
+    let restored = HudFrameGeometry.restoredFrame(saved, screens: [a, b], main: a)
+    try check(rectContains(b.visibleFrame, restored), "应选相交面积最大的屏幕 B 并夹取，实际: \(restored)")
+    try check(restored.maxY == b.visibleFrame.maxY, "顶部越界应贴齐 B 可用区上缘")
+}
+
+func checkHudFrameSwitchKeepsTopLeft() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let b = hudScreen(CGRect(x: 1920, y: 0, width: 2560, height: 1440), visible: CGRect(x: 1920, y: 25, width: 2560, height: 1415))
+    let target = CGSize(width: 720, height: 592)
+
+    // 当前窗口在 A，目标尺寸足够容纳：左上角应原样保留，不受 B 上旧保存位置影响。
+    let current = CGRect(x: 100, y: 700, width: 380, height: 144)
+    let switched = HudFrameGeometry.switchedFrame(current: current, targetSize: target, screens: [a, b], main: a)
+    try check(switched.origin == CGPoint(x: 100, y: 844 - 592), "应保留当前左上角，实际: \(switched.origin)")
+    try check(switched.size == target, "仅取目标尺寸")
+    try check(rectContains(a.visibleFrame, switched), "应留在当前屏 A，实际: \(switched)")
+
+    // 当前窗口靠近 A 底部，展开后顶部越界：夹取进 A，仍不跳到 B。
+    let low = CGRect(x: 100, y: 200, width: 380, height: 144)
+    let clamped = HudFrameGeometry.switchedFrame(current: low, targetSize: target, screens: [a, b], main: a)
+    try check(rectContains(a.visibleFrame, clamped), "越界应夹取进当前屏 A，实际: \(clamped)")
+    try check(clamped.minX == 100 && clamped.minY == a.visibleFrame.minY, "水平保留左上角、垂直贴齐下缘")
+}
+
+func checkHudFrameSwitchShrinksOversizedTarget() throws {
+    let small = hudScreen(CGRect(x: 0, y: 0, width: 800, height: 625), visible: CGRect(x: 0, y: 25, width: 800, height: 600))
+    let current = CGRect(x: 10, y: 100, width: 380, height: 144)
+    let switched = HudFrameGeometry.switchedFrame(current: current, targetSize: CGSize(width: 900, height: 700), screens: [small], main: small)
+    try check(rectContains(small.visibleFrame, switched), "超尺寸目标应缩小并夹取，实际: \(switched)")
+    try check(switched.width == 800 && switched.height == 600, "尺寸应缩到可用区上限")
 }

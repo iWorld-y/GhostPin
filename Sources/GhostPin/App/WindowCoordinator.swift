@@ -1,8 +1,11 @@
 import AppKit
 import OSLog
 import SwiftUI
+import GhostPinCore
 
+#if DEBUG
 private let hudLogger = Logger(subsystem: "com.oyuxi.TodoPin", category: "HUD")
+#endif
 
 @MainActor
 final class WindowCoordinator: NSObject, NSWindowDelegate {
@@ -45,18 +48,20 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             window.backgroundColor = .clear
             window.isMovableByWindowBackground = true
             window.hidesOnDeactivate = false
-            window.minSize = minimumSize(for: view)
+            window.minSize = minimumSize(for: view, interactive: appState.preferences.hudMode == .interactive)
             if let savedFrame {
-                window.setFrame(savedFrame.nsRect, display: false)
-                if !Self.frameIntersectsAnyScreen(savedFrame.nsRect) {
-                    window.center()
-                }
+                window.setFrame(
+                    HudFrameGeometry.restoredFrame(savedFrame.nsRect, screens: Self.hudScreens(), main: Self.mainHudScreen()),
+                    display: false
+                )
             } else {
                 window.center()
             }
             boardWindow = window
             needsInitialHUDHeight = view == .list && savedFrame == nil
+            #if DEBUG
             hudLogger.info("showBoard view=\(view.rawValue, privacy: .public) frame=\(NSStringFromRect(window.frame), privacy: .public)")
+            #endif
         }
 
         boardWindow?.contentView = NSHostingView(
@@ -76,11 +81,12 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
 
     /// 首次展示且未保存尺寸时采用内容高度，之后由用户调整并持久化窗口尺寸。
     private func applyInitialHUDHeight(_ height: CGFloat) {
-        guard needsInitialHUDHeight, currentLayout == .list, let boardWindow else {
+        guard needsInitialHUDHeight, currentLayout == .list, let appState, let boardWindow else {
             return
         }
         needsInitialHUDHeight = false
-        let height = max(height, DesktopNotesBoardView.minimumSize.height)
+        let minHeight = minimumSize(for: .list, interactive: appState.preferences.hudMode == .interactive).height
+        let height = max(height, minHeight)
         var frame = boardWindow.frame
         frame.origin.y += frame.height - height
         frame.size.height = height
@@ -104,6 +110,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             return
         }
         applyHudLayout()
+        applyHudModeMetrics()
         let interactive = appState.preferences.hudMode == .interactive
         boardWindow.ignoresMouseEvents = !interactive
         isPointerInsideHUD = boardWindow.frame.contains(NSEvent.mouseLocation)
@@ -123,8 +130,8 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         applyHUDAlpha()
     }
 
-    /// 按生效视图切换窗口尺寸：列表与四象限分别恢复已保存尺寸，
-    /// 首次展开固定左上角并限制在当前屏幕可用区域。
+    /// 按生效视图切换窗口尺寸：保留当前左上角，目标布局仅取已保存尺寸（缺省用默认值），
+    /// 在当前屏可用区内夹取，避免跳回旧位置或旧显示器。
     private func applyHudLayout() {
         guard let appState, let boardWindow else {
             return
@@ -134,27 +141,53 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             return
         }
         saveBoardFrame()
+        let oldFrame = boardWindow.frame
         currentLayout = target
         needsInitialHUDHeight = false
-        boardWindow.minSize = minimumSize(for: target)
 
-        let oldFrame = boardWindow.frame
-        var frame: NSRect
-        if let saved = framePreference(for: target), Self.frameIntersectsAnyScreen(saved.nsRect) {
-            frame = saved.nsRect
-        } else {
-            let size = target == .quadrants
-                ? DesktopNotesBoardView.quadrantsDefaultSize
-                : NSSize(width: DesktopNotesBoardView.defaultWidth, height: 460)
-            frame = NSRect(x: oldFrame.minX, y: oldFrame.maxY - size.height, width: size.width, height: size.height)
-            needsInitialHUDHeight = target == .list
-        }
-        frame = Self.clampedFrame(frame)
+        let saved = framePreference(for: target)
+        let size = saved.map { NSSize(width: $0.width, height: $0.height) } ?? defaultSize(for: target)
+        let frame = HudFrameGeometry.switchedFrame(
+            current: oldFrame,
+            targetSize: size,
+            screens: Self.hudScreens(),
+            main: Self.mainHudScreen()
+        )
+        needsInitialHUDHeight = target == .list && saved == nil
+
+        // minSize 变化可能触发 resize，与 setFrame 一起纳入切换保护。
         isSwitchingLayout = true
+        boardWindow.minSize = minimumSize(for: target, interactive: appState.preferences.hudMode == .interactive)
         boardWindow.setFrame(frame, display: true)
         isSwitchingLayout = false
         saveBoardFrame()
+        #if DEBUG
         hudLogger.info("layout view=\(target.rawValue, privacy: .public) frame=\(NSStringFromRect(frame), privacy: .public)")
+        #endif
+    }
+
+    /// 同一布局内模式变化（如穿透列表→交互列表）：保证交互工具栏与空状态有足够高度，
+    /// 不足时保留左上角增高；该增高不写回偏好，穿透仍恢复紧凑列表尺寸。
+    private func applyHudModeMetrics() {
+        guard let appState, let boardWindow else {
+            return
+        }
+        let interactive = appState.preferences.hudMode == .interactive
+        let required = minimumSize(for: currentLayout, interactive: interactive)
+        guard boardWindow.minSize != required else {
+            return
+        }
+        isSwitchingLayout = true
+        boardWindow.minSize = required
+        var frame = boardWindow.frame
+        if frame.height < required.height || frame.width < required.width {
+            let newHeight = max(frame.height, required.height)
+            frame.origin.y += frame.height - newHeight
+            frame.size.height = newHeight
+            frame.size.width = max(frame.width, required.width)
+            boardWindow.setFrame(frame, display: true)
+        }
+        isSwitchingLayout = false
     }
 
     private func framePreference(for view: HudView) -> HudWindowFrame? {
@@ -164,21 +197,25 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         return view == .quadrants ? appState.preferences.hudQuadrantsFrame : appState.preferences.hudFrame
     }
 
-    private func minimumSize(for view: HudView) -> NSSize {
-        view == .quadrants ? DesktopNotesBoardView.quadrantsMinimumSize : DesktopNotesBoardView.minimumSize
+    private func defaultSize(for view: HudView) -> NSSize {
+        view == .quadrants
+            ? DesktopNotesBoardView.quadrantsDefaultSize
+            : NSSize(width: DesktopNotesBoardView.defaultWidth, height: 460)
     }
 
-    private static func clampedFrame(_ frame: NSRect) -> NSRect {
-        let screen = NSScreen.screens.first { $0.frame.intersects(frame) } ?? NSScreen.main
-        guard let visible = screen?.visibleFrame else {
-            return frame
+    private func minimumSize(for view: HudView, interactive: Bool) -> NSSize {
+        if view == .quadrants {
+            return DesktopNotesBoardView.quadrantsMinimumSize
         }
-        var result = frame
-        result.size.width = min(result.width, visible.width)
-        result.size.height = min(result.height, visible.height)
-        result.origin.x = min(max(result.origin.x, visible.minX), visible.maxX - result.width)
-        result.origin.y = min(max(result.origin.y, visible.minY), visible.maxY - result.height)
-        return result
+        return interactive ? DesktopNotesBoardView.interactiveMinimumSize : DesktopNotesBoardView.minimumSize
+    }
+
+    private static func hudScreens() -> [HudScreen] {
+        NSScreen.screens.map { HudScreen(frame: $0.frame, visibleFrame: $0.visibleFrame) }
+    }
+
+    private static func mainHudScreen() -> HudScreen? {
+        NSScreen.main.map { HudScreen(frame: $0.frame, visibleFrame: $0.visibleFrame) }
     }
 
     /// 目标不透明度：穿透模式下指针位于 HUD 内即完全不可见，其余情况用偏好值。
@@ -256,10 +293,6 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         } else {
             appState.preferences.hudFrame = saved
         }
-    }
-
-    private static func frameIntersectsAnyScreen(_ frame: NSRect) -> Bool {
-        NSScreen.screens.contains { $0.frame.intersects(frame) }
     }
 }
 

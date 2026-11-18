@@ -158,10 +158,21 @@ final class AppPreferences: ObservableObject {
         defaults.set(data, forKey: Keys.hudQuadrantsFrame)
     }
 
-    /// Debug 隔离验证：设置 GHOSTPIN_TEST_SUPPORT_ROOT 时偏好写入该目录，不碰真实 UserDefaults。
-    static func liveDefaults() -> UserDefaults {
+    /// Debug 隔离验证：设置 GHOSTPIN_TEST_SUPPORT_ROOT 时为隔离环境，
+    /// 偏好写入该目录，且跳过真实登录项与系统授权等副作用。
+    static var isIsolatedVerification: Bool {
         #if DEBUG
         if let path = ProcessInfo.processInfo.environment["GHOSTPIN_TEST_SUPPORT_ROOT"], !path.isEmpty {
+            return true
+        }
+        #endif
+        return false
+    }
+
+    static func liveDefaults() -> UserDefaults {
+        #if DEBUG
+        if isIsolatedVerification,
+           let path = ProcessInfo.processInfo.environment["GHOSTPIN_TEST_SUPPORT_ROOT"] {
             let plistPath = URL(fileURLWithPath: path, isDirectory: true)
                 .appendingPathComponent("preferences")
                 .path

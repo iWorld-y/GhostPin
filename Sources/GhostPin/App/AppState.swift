@@ -5,7 +5,9 @@ import OSLog
 import SwiftUI
 import GhostPinCore
 
+#if DEBUG
 private let hudLogger = Logger(subsystem: "com.oyuxi.TodoPin", category: "HUD")
+#endif
 
 @MainActor
 final class AppState: ObservableObject {
@@ -74,10 +76,13 @@ final class AppState: ObservableObject {
             }
         }
 
-        do {
-            try LaunchAtLoginService.reconcile(preferredEnabled: preferences.launchAtLogin)
-        } catch {
-            lastErrorMessage = error.localizedDescription
+        // 隔离验证不触碰真实登录项（打包 ID 与正式 App 相同，reconcile 可能注销用户登录项）。
+        if !AppPreferences.isIsolatedVerification {
+            do {
+                try LaunchAtLoginService.reconcile(preferredEnabled: preferences.launchAtLogin)
+            } catch {
+                lastErrorMessage = error.localizedDescription
+            }
         }
 
         todoStore.objectWillChange
@@ -90,7 +95,10 @@ final class AppState: ObservableObject {
     }
 
     func start() {
-        notificationService.requestAuthorization()
+        // 隔离验证不发起真实系统通知授权请求。
+        if !AppPreferences.isIsolatedVerification {
+            notificationService.requestAuthorization()
+        }
         reminderService.start()
         windowCoordinator.showBoard()
 
@@ -154,7 +162,9 @@ final class AppState: ObservableObject {
 
     func toggleHUDMode() {
         preferences.hudMode = preferences.hudMode == .interactive ? .passthrough : .interactive
+        #if DEBUG
         hudLogger.info("toggleHUDMode mode=\(self.preferences.hudMode.rawValue, privacy: .public) view=\(self.preferences.effectiveHudView.rawValue, privacy: .public)")
+        #endif
         windowCoordinator.updateHUD()
         windowCoordinator.applyHUDInteraction()
     }
@@ -165,7 +175,9 @@ final class AppState: ObservableObject {
             return
         }
         preferences.hudInteractiveView = view
+        #if DEBUG
         hudLogger.info("setHudInteractiveView view=\(view.rawValue, privacy: .public)")
+        #endif
         windowCoordinator.updateHUD()
     }
 

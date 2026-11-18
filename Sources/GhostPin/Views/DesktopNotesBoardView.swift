@@ -9,6 +9,8 @@ struct DesktopNotesBoardView: View {
 
     static let defaultWidth: CGFloat = 380
     static let minimumSize = NSSize(width: 320, height: 144)
+    /// 交互列表最小高度：header 39 + toolbar 40 + 空状态 80 + footer 25。
+    static let interactiveMinimumSize = NSSize(width: 320, height: 184)
     static let quadrantsDefaultSize = NSSize(width: 720, height: 592)
     static let quadrantsMinimumSize = NSSize(width: 560, height: 320)
     private static let headerHeight: CGFloat = 39
@@ -22,14 +24,14 @@ struct DesktopNotesBoardView: View {
 
     var body: some View {
         let view = appState.preferences.effectiveHudView
-        let listProjection = projection
-        let quadrantProjection = quadrantProjection
-        let isEmpty = listProjection.doing.isEmpty && listProjection.todo.isEmpty
-        let doingCount = view == .quadrants ? quadrantProjection.doingCount : listProjection.doingCount
-        let todoCount = view == .quadrants ? quadrantProjection.todoCount : listProjection.todoCount
-        let visibleCount = view == .quadrants
-            ? quadrantProjection.doingCount + quadrantProjection.todoCount
-            : listProjection.doing.count + listProjection.todo.count
+        // 仅计算当前视图所需的投影，避免每次 body 都排序两份。
+        let listProjection: HudProjection? = view == .list ? projection : nil
+        let quadrantProjection: HudQuadrantProjection? = view == .quadrants ? quadrantProjection : nil
+        let isEmpty = listProjection.map { $0.doing.isEmpty && $0.todo.isEmpty } ?? false
+        let doingCount = quadrantProjection?.doingCount ?? listProjection?.doingCount ?? 0
+        let todoCount = quadrantProjection?.todoCount ?? listProjection?.todoCount ?? 0
+        let visibleCount = quadrantProjection.map { $0.doingCount + $0.todoCount }
+            ?? listProjection.map { $0.doing.count + $0.todo.count } ?? 0
 
         GeometryReader { geometry in
             VStack(spacing: 0) {
@@ -45,7 +47,6 @@ struct DesktopNotesBoardView: View {
                     view,
                     listProjection: listProjection,
                     quadrantProjection: quadrantProjection,
-                    isEmpty: isEmpty,
                     availableHeight: geometry.size.height - Self.headerHeight - Self.footerHeight - (isInteractive ? Self.toolbarHeight : 0)
                 )
 
@@ -91,17 +92,18 @@ struct DesktopNotesBoardView: View {
     @ViewBuilder
     private func boardBody(
         _ view: HudView,
-        listProjection: HudProjection,
-        quadrantProjection: HudQuadrantProjection,
-        isEmpty: Bool,
+        listProjection: HudProjection?,
+        quadrantProjection: HudQuadrantProjection?,
         availableHeight: CGFloat
     ) -> some View {
-        if view == .quadrants {
+        if view == .quadrants, let quadrantProjection {
             quadrantGrid(quadrantProjection, height: max(0, availableHeight))
-        } else if isEmpty {
-            emptyState
-        } else {
-            taskList(listProjection, availableHeight: availableHeight)
+        } else if let listProjection {
+            if listProjection.doing.isEmpty && listProjection.todo.isEmpty {
+                emptyState
+            } else {
+                taskList(listProjection, availableHeight: availableHeight)
+            }
         }
     }
 
@@ -454,7 +456,8 @@ struct DesktopNotesBoardView: View {
     }
 
     private func reportPreferredHeight(_ bodyHeight: CGFloat) {
-        onPreferredHeightChange(Self.headerHeight + bodyHeight + Self.footerHeight)
+        let toolbar = isInteractive ? Self.toolbarHeight : 0
+        onPreferredHeightChange(Self.headerHeight + toolbar + bodyHeight + Self.footerHeight)
     }
 }
 
