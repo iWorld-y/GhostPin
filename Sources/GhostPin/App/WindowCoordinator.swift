@@ -104,13 +104,20 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             return
         }
         needsInitialHUDHeight = false
-        let minHeight = minimumSize(for: .list, interactive: appState.preferences.hudMode == .interactive).height
-        let height = max(height, minHeight)
-        listBaseHeight = height
+        let interactive = appState.preferences.hudMode == .interactive
+        let minHeight = minimumSize(for: .list, interactive: interactive).height
+        let measured = max(height, minHeight)
+        // 基准取紧凑高度（扣除交互工具栏增量），显示用实测全高，避免工具栏增高污染紧凑基准。
+        listBaseHeight = HudFrameGeometry.compactBaseHeight(
+            measuredHeight: measured,
+            interactive: interactive,
+            interactiveMinimum: DesktopNotesBoardView.interactiveMinimumSize.height,
+            passthroughMinimum: DesktopNotesBoardView.minimumSize.height
+        )
         // 最终尺寸确定后沿收起所选边重新对齐并夹取，避免收缩后脱离边缘。
         let frame = HudFrameGeometry.contentFittedListFrame(
             current: boardWindow.frame,
-            finalHeight: height,
+            finalHeight: measured,
             snapEdge: pendingSnapEdge,
             screens: Self.hudScreens(),
             main: Self.mainHudScreen()
@@ -161,7 +168,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     }
 
     /// 按生效视图切换窗口尺寸：一般切换保留当前左上角、目标仅取尺寸并夹取；
-    /// 交互四象限→穿透列表自动贴当前屏可用区最近边；收起后恢复四象限还原收起前 frame。
+    /// 四象限收为列表（交互手动「单列」与穿透收起）自动贴当前屏可用区最近边；收起后恢复四象限还原收起前 frame。
     private func applyHudLayout() {
         guard let appState, let boardWindow else {
             return
@@ -173,8 +180,8 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         saveBoardFrame()
         let oldFrame = boardWindow.frame
         let mode = appState.preferences.hudMode
-        // 仅交互四象限→穿透列表自动贴边；收起后再次进入交互恢复四象限还原收起前 frame。
-        let collapsingToPassthroughList = currentLayout == .quadrants && target == .list && mode == .passthrough
+        // 四象限收为列表（交互手动「单列」与穿透收起）都贴最近边；收起后恢复四象限还原收起前 frame。
+        let collapsingQuadrantsToList = currentLayout == .quadrants && target == .list
         let restoringCollapsedQuadrants = currentLayout == .list && target == .quadrants && mode == .interactive && lastHudMode == .passthrough
         currentLayout = target
         needsInitialHUDHeight = false
@@ -191,7 +198,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             )
         }
         let frame: CGRect
-        if collapsingToPassthroughList {
+        if collapsingQuadrantsToList {
             frame = HudFrameGeometry.collapsedListFrame(
                 current: oldFrame,
                 targetSize: size,

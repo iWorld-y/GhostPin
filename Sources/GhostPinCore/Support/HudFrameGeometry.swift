@@ -68,11 +68,22 @@ public enum HudFrameGeometry {
         return frame
     }
 
-    /// 列表在目标模式下的有效高度：交互不小于交互最小值，穿透沿用基准高度。
-    /// 基准高度取持久化的列表尺寸（用户主动调整或内容适配），临时增高不写回，
-    /// 因此反向切换能还原紧凑高度，而用户调高的尺寸得以保留。
+    /// 列表在目标模式下的显示高度：基准为紧凑高度（不含工具栏），穿透沿用基准，
+    /// 交互在基准上加工具栏增量（交互最小值与穿透最小值之差），并不低于交互最小值。
     public static func listHeight(baseHeight: CGFloat, interactive: Bool, interactiveMinimum: CGFloat, passthroughMinimum: CGFloat) -> CGFloat {
-        max(baseHeight, interactive ? interactiveMinimum : passthroughMinimum)
+        let base = max(baseHeight, passthroughMinimum)
+        guard interactive else {
+            return base
+        }
+        let toolbar = max(0, interactiveMinimum - passthroughMinimum)
+        return max(base + toolbar, interactiveMinimum)
+    }
+
+    /// 从实测显示高度推导紧凑基准高度：交互显示含工具栏，减去工具栏增量得紧凑高度，
+    /// 以免交互工具栏的临时增高污染紧凑基准。
+    public static func compactBaseHeight(measuredHeight: CGFloat, interactive: Bool, interactiveMinimum: CGFloat, passthroughMinimum: CGFloat) -> CGFloat {
+        let toolbar = interactive ? max(0, interactiveMinimum - passthroughMinimum) : 0
+        return max(passthroughMinimum, measuredHeight - toolbar)
     }
 
     /// 列表模式切换的目标 frame：以有效高度保留当前左上角，并夹取进当前屏可用区。
