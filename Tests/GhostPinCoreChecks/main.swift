@@ -113,8 +113,9 @@ let checks: [Check] = [
     ("HudFrameGeometry collapse content-fit re-aligns bottom edge and persists", checkHudCollapseContentFitRealignsBottom),
     ("HudFrameGeometry collapse content-fit keeps left edge aligned", checkHudCollapseContentFitLeftEdge),
     ("HudFrameGeometry manual interactive collapse snaps and keeps compact base", checkHudManualCollapseSnapsKeepsCompactBase),
-    ("HudFrameGeometry manual collapse no-history content-fit yields compact base", checkHudManualCollapseNoHistoryContentFit),
+    ("HudFrameGeometry manual collapse no-history content-fit keeps measured height", checkHudManualCollapseNoHistoryContentFit),
     ("HudFrameGeometry manual vs passthrough collapse differ only by mode height", checkHudManualVsPassthroughCollapseHeight),
+    ("HudFrameGeometry legacy 300 preference and user drag round-trip keep 300", checkHudLegacyPreference300AndUserDragRoundTrip),
     ("TodoStore sorts open items by priority then due date", checkSortsOpenItemsByPriorityThenDueDate),
     ("TodoStore sinks overdue items to bottom", checkSortsOverdueItemsToBottom),
     ("TodoStore sorts items without due date after those with", checkSortsItemsWithoutDueDateLast),
@@ -1690,15 +1691,13 @@ func checkHudListModeHeightRoundTrip() throws {
 
 func checkHudListModeRespectsUserResize() throws {
     let screen = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
-    let userBase: CGFloat = 300   // 用户调整的紧凑基准
-    try check(HudFrameGeometry.listHeight(baseHeight: userBase, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 340, "交互应在用户基准 300 上加 40 工具栏")
-    try check(HudFrameGeometry.listHeight(baseHeight: userBase, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "穿透应保留用户基准 300")
-    let interactiveCurrent = CGRect(x: 100, y: 400, width: 380, height: 340)
-    let interactive = HudFrameGeometry.listModeFrame(current: interactiveCurrent, baseHeight: userBase, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
-    try check(interactive == interactiveCurrent, "交互应保持用户显示高 340")
-    let passthroughCurrent = CGRect(x: 100, y: 400, width: 380, height: 300)
-    let passthrough = HudFrameGeometry.listModeFrame(current: passthroughCurrent, baseHeight: userBase, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
-    try check(passthrough == passthroughCurrent, "穿透应保持用户紧凑 300")
+    let userHeight: CGFloat = 300
+    let current = CGRect(x: 100, y: 400, width: 380, height: userHeight)
+    try check(HudFrameGeometry.listHeight(baseHeight: userHeight, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "交互应保留用户 300")
+    try check(HudFrameGeometry.listHeight(baseHeight: userHeight, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "穿透应保留用户 300")
+    let interactive = HudFrameGeometry.listModeFrame(current: current, baseHeight: userHeight, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    let passthrough = HudFrameGeometry.listModeFrame(current: current, baseHeight: userHeight, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    try check(interactive == current && passthrough == current, "已足够高的用户尺寸两种模式都应保持")
 }
 
 func checkHudListModeBottomEdgeClamp() throws {
@@ -1718,7 +1717,7 @@ func checkHudListModeBottomEdgeClamp() throws {
 func checkHudListModeSavedOldSizeRestore() throws {
     // 启动恢复/四象限→交互列表：旧的 144 列表尺寸应先按交互最小值抬到 184 再夹取。
     try check(HudFrameGeometry.listHeight(baseHeight: 144, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 184, "旧 144 交互应算为 184")
-    try check(HudFrameGeometry.listHeight(baseHeight: 300, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 340, "旧 300 交互应加工具栏为 340 不被压低")
+    try check(HudFrameGeometry.listHeight(baseHeight: 300, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "旧 300 交互不应被压低")
     try check(HudFrameGeometry.listHeight(baseHeight: 144, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 144, "旧 144 穿透应保持 144")
 
     // 反向切换：临时增高到 184 后，以持久化基准 144 还原。
@@ -1930,21 +1929,29 @@ func checkHudManualCollapseSnapsKeepsCompactBase() throws {
 func checkHudManualCollapseNoHistoryContentFit() throws {
     let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
     let quadrants = CGRect(x: 600, y: 30, width: 720, height: 592)
-    // 无历史列表尺寸：默认 460 经交互显示高算为 500 贴底。
+    // 无历史列表尺寸：默认 460 贴底（交互最小值不高于 460）。
     let provisionalHeight = HudFrameGeometry.listHeight(baseHeight: 460, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
-    try check(provisionalHeight == 500, "默认 460 交互显示应为 500")
+    try check(provisionalHeight == 460, "默认 460 交互显示应为 460")
     let collapsed = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: provisionalHeight), screens: [a], main: a)
-    try check(collapsed.minY == 25 && collapsed.height == 500, "无历史收起应先贴底")
+    try check(collapsed.minY == 25 && collapsed.height == 460, "无历史收起应先贴底")
 
-    // 首次内容适配实测交互空列表 184：紧凑基准应为 144（扣工具栏），显示 184 并沿下边重对齐。
-    let compactBase = HudFrameGeometry.compactBaseHeight(measuredHeight: 184, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
-    try check(compactBase == 144, "交互内容适配应推导紧凑基准 144 而非 184")
+    // 首次内容适配实测交互空列表 184：基准按实测全高建立，显示 184 并沿下边重对齐。
     let fitted = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 184, snapEdge: .bottom, screens: [a], main: a)
     try check(fitted.height == 184 && fitted.minY == 25, "内容适配后应贴底且工具栏可见，实际: \(fitted)")
-    let persisted = HudFrameGeometry.persistedListFrame(actual: fitted, baseHeight: compactBase)
-    try check(persisted.height == 144 && persisted.minY == 25, "应持久化紧凑基准与贴底位置")
+    let persisted = HudFrameGeometry.persistedListFrame(actual: fitted, baseHeight: 184)
+    try check(persisted.height == 184 && persisted.minY == 25, "应持久化实测基准与贴底位置")
+    // 同模式下一次刷新不丢高度。
+    let refreshed = HudFrameGeometry.listModeFrame(current: fitted, baseHeight: 184, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144, screens: [a], main: a)
+    try check(refreshed.height == 184, "同模式刷新应保持 184")
     let restarted = HudFrameGeometry.restoredFrame(persisted, screens: [a], main: a)
-    try check(restarted.height == 144 && restarted.minY == 25, "重启应恢复紧凑贴底位置，实际: \(restarted)")
+    try check(restarted.height == 184 && restarted.minY == 25, "重启应恢复实测高度与贴底位置，实际: \(restarted)")
+
+    // 初次适配超过最小值（如有任务实测 340）：同模式刷新与重启不丢高度。
+    let tall = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 340, snapEdge: .bottom, screens: [a], main: a)
+    try check(tall.height == 340 && tall.minY == 25, "超最小值内容适配应贴底")
+    try check(HudFrameGeometry.listHeight(baseHeight: 340, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 340, "同模式刷新应保持 340")
+    let tallRestart = HudFrameGeometry.restoredFrame(HudFrameGeometry.persistedListFrame(actual: tall, baseHeight: 340), screens: [a], main: a)
+    try check(tallRestart.height == 340, "重启应保持 340 不丢高度")
 }
 
 func checkHudManualVsPassthroughCollapseHeight() throws {
@@ -1957,4 +1964,35 @@ func checkHudManualVsPassthroughCollapseHeight() throws {
     let passthrough = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: passthroughHeight), screens: [a], main: a)
     try check(manual.minY == 25 && passthrough.minY == 25, "两条入口应贴同一边")
     try check(manual.height == 184 && passthrough.height == 144, "交互含工具栏 184、穿透紧凑 144")
+}
+
+func checkHudLegacyPreference300AndUserDragRoundTrip() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    func frame(_ height: CGFloat) -> CGRect { CGRect(x: 100, y: 400, width: 380, height: height) }
+
+    // 旧偏好 300 启动：交互/穿透都应为 300，不被抬到 340。
+    var base: CGFloat = 300
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "旧偏好 300 交互启动应为 300")
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "旧偏好 300 穿透启动应为 300")
+    let startup = HudFrameGeometry.restoredFrame(HudFrameGeometry.persistedListFrame(actual: frame(300), baseHeight: base), screens: [a], main: a)
+    try check(startup.height == 300, "旧偏好 300 重启应恢复 300")
+
+    // 用户从交互 184 实际拖到 300：基准更新为 300 并持久化。
+    base = 144
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 184, "紧凑 144 交互显示 184")
+    base = HudFrameGeometry.updatedListBaseHeight(actualHeight: 300, currentBaseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
+    try check(base == 300, "用户拖到 300 应更新基准 300")
+    var persisted = HudFrameGeometry.persistedListFrame(actual: frame(300), baseHeight: base).height
+    try check(persisted == 300, "应持久化 300")
+
+    // 来回切换与重启：交互/穿透/再交互/重启都保持 300，不再变 340。
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "再交互应保持 300")
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "穿透应保持 300")
+    base = persisted
+    let restarted = HudFrameGeometry.restoredFrame(HudFrameGeometry.persistedListFrame(actual: frame(300), baseHeight: base), screens: [a], main: a)
+    try check(restarted.height == 300 && base == 300, "重启后基准与高度仍 300")
+
+    // 仅调宽（高度仍 300）不改变基准。
+    let widthOnly = HudFrameGeometry.updatedListBaseHeight(actualHeight: 300, currentBaseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
+    try check(widthOnly == 300, "仅调宽应保留 300")
 }

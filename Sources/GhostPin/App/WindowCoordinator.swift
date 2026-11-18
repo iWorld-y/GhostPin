@@ -107,13 +107,9 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         let interactive = appState.preferences.hudMode == .interactive
         let minHeight = minimumSize(for: .list, interactive: interactive).height
         let measured = max(height, minHeight)
-        // 基准取紧凑高度（扣除交互工具栏增量），显示用实测全高，避免工具栏增高污染紧凑基准。
-        listBaseHeight = HudFrameGeometry.compactBaseHeight(
-            measuredHeight: measured,
-            interactive: interactive,
-            interactiveMinimum: DesktopNotesBoardView.interactiveMinimumSize.height,
-            passthroughMinimum: DesktopNotesBoardView.minimumSize.height
-        )
+        // 首次内容适配按实测全高建立基准（含交互工具栏），保证同模式刷新与重启不丢高度；
+        // 模式最小高度的临时增高由 applyHudModeMetrics 处理，不写回基准。
+        listBaseHeight = measured
         // 最终尺寸确定后沿收起所选边重新对齐并夹取，避免收缩后脱离边缘。
         let frame = HudFrameGeometry.contentFittedListFrame(
             current: boardWindow.frame,
