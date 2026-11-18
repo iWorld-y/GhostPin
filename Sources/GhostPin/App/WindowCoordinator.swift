@@ -15,6 +15,8 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     private var needsInitialHUDHeight = false
     private var currentLayout: HudView = .list
     private var isSwitchingLayout = false
+    /// 列表基准高度（用户/内容选定，不含交互临时增高）；仅用户真实调高或内容适配时更新。
+    private var listBaseHeight: CGFloat?
 
     var isBoardVisible: Bool {
         boardWindow?.isVisible == true
@@ -33,6 +35,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             let view = appState.preferences.effectiveHudView
             currentLayout = view
             let savedFrame = framePreference(for: view)
+            listBaseHeight = appState.preferences.hudFrame?.height
             let interactive = appState.preferences.hudMode == .interactive
             let defaultSize = view == .quadrants
                 ? DesktopNotesBoardView.quadrantsDefaultSize
@@ -98,10 +101,14 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         needsInitialHUDHeight = false
         let minHeight = minimumSize(for: .list, interactive: appState.preferences.hudMode == .interactive).height
         let height = max(height, minHeight)
+        listBaseHeight = height
         var frame = boardWindow.frame
         frame.origin.y += frame.height - height
         frame.size.height = height
+        isSwitchingLayout = true
         boardWindow.setFrame(frame, display: true)
+        isSwitchingLayout = false
+        saveBoardFrame()
     }
 
     func hideBoard() {
@@ -194,7 +201,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         }
         let interactive = appState.preferences.hudMode == .interactive
         let required = minimumSize(for: .list, interactive: interactive)
-        let baseHeight = appState.preferences.hudFrame?.height ?? boardWindow.frame.height
+        let baseHeight = listBaseHeight ?? boardWindow.frame.height
         let target = HudFrameGeometry.listModeFrame(
             current: boardWindow.frame,
             baseHeight: baseHeight,
@@ -297,26 +304,42 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     }
 
     func windowDidResize(_ notification: Notification) {
-        guard !isSwitchingLayout else { return }
+        guard !isSwitchingLayout, let appState, let boardWindow else { return }
+        if currentLayout == .list {
+            // 仅当高度偏离当前显示高度时才视为用户真实调高；仅调宽/程序化显示保留基准。
+            listBaseHeight = HudFrameGeometry.updatedListBaseHeight(
+                actualHeight: boardWindow.frame.height,
+                currentBaseHeight: listBaseHeight ?? boardWindow.frame.height,
+                interactive: appState.preferences.hudMode == .interactive,
+                interactiveMinimum: DesktopNotesBoardView.interactiveMinimumSize.height,
+                passthroughMinimum: DesktopNotesBoardView.minimumSize.height
+            )
+        }
         saveBoardFrame()
     }
 
-    /// 缩放与移动回调按当前视图保存尺寸，避免把四象限尺寸写入列表偏好。
+    /// 缩放与移动回调按当前视图保存：四象限存完整 frame；列表位置/宽度取实际值，
+    /// 高度始终存基准高度，避免把交互临时增高、仅移动/仅调宽写回基准。
     private func saveBoardFrame() {
         guard let boardWindow, let appState else {
             return
         }
         let frame = boardWindow.frame
-        let saved = HudWindowFrame(
-            x: frame.origin.x,
-            y: frame.origin.y,
-            width: frame.size.width,
-            height: frame.size.height
-        )
         if currentLayout == .quadrants {
-            appState.preferences.hudQuadrantsFrame = saved
+            appState.preferences.hudQuadrantsFrame = HudWindowFrame(
+                x: frame.origin.x,
+                y: frame.origin.y,
+                width: frame.size.width,
+                height: frame.size.height
+            )
         } else {
-            appState.preferences.hudFrame = saved
+            let persisted = HudFrameGeometry.persistedListFrame(actual: frame, baseHeight: listBaseHeight ?? frame.height)
+            appState.preferences.hudFrame = HudWindowFrame(
+                x: persisted.minX,
+                y: persisted.minY,
+                width: persisted.width,
+                height: persisted.height
+            )
         }
     }
 }

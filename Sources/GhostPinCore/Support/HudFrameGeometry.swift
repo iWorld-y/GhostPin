@@ -90,4 +90,16 @@ public enum HudFrameGeometry {
         }
         return frame
     }
+
+    /// 用户调整列表窗口后的基准高度决策：仅当实际高度偏离当前模式应有的显示高度时，
+    /// 视为用户真实改变了高度并更新基准；仅移动/仅调宽/程序化显示（高度等于显示高度）保留基准。
+    public static func updatedListBaseHeight(actualHeight: CGFloat, currentBaseHeight: CGFloat, interactive: Bool, interactiveMinimum: CGFloat, passthroughMinimum: CGFloat) -> CGFloat {
+        let displayHeight = listHeight(baseHeight: currentBaseHeight, interactive: interactive, interactiveMinimum: interactiveMinimum, passthroughMinimum: passthroughMinimum)
+        return actualHeight == displayHeight ? currentBaseHeight : actualHeight
+    }
+
+    /// 列表持久化 frame：位置与宽度取实际值，高度取基准高度，避免把交互临时增高写回基准。
+    public static func persistedListFrame(actual: CGRect, baseHeight: CGFloat) -> CGRect {
+        CGRect(origin: CGPoint(x: actual.minX, y: actual.minY), size: CGSize(width: actual.width, height: baseHeight))
+    }
 }

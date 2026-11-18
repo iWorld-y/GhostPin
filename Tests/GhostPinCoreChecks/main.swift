@@ -104,6 +104,7 @@ let checks: [Check] = [
     ("HudFrameGeometry.listModeFrame respects user-resized height", checkHudListModeRespectsUserResize),
     ("HudFrameGeometry.listModeFrame clamps growth at screen bottom", checkHudListModeBottomEdgeClamp),
     ("HudFrameGeometry.listHeight raises saved compact size for interactive", checkHudListModeSavedOldSizeRestore),
+    ("HudFrameGeometry list base height survives quadrants round-trip and restart", checkHudListBaseHeightPersistenceChain),
     ("TodoStore sorts open items by priority then due date", checkSortsOpenItemsByPriorityThenDueDate),
     ("TodoStore sinks overdue items to bottom", checkSortsOverdueItemsToBottom),
     ("TodoStore sorts items without due date after those with", checkSortsItemsWithoutDueDateLast),
@@ -1713,4 +1714,55 @@ func checkHudListModeSavedOldSizeRestore() throws {
     let transient = CGRect(x: 100, y: 360, width: 380, height: 184)
     let restored = HudFrameGeometry.listModeFrame(current: transient, baseHeight: 144, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
     try check(restored.height == 144 && restored.origin == CGPoint(x: 100, y: 400), "应还原保存的旧 144 尺寸，实际: \(restored)")
+}
+
+func checkHudListBaseHeightPersistenceChain() throws {
+    // 串联协调器实际调用的保存/恢复决策：列表显示高度=listHeight，离开/进入布局与移动/调宽
+    // 的持久化=persistedListFrame（高度取基准），用户调高=updatedListBaseHeight，重启从持久化高度加载基准。
+    func display(_ base: CGFloat, _ interactive: Bool) -> CGFloat {
+        HudFrameGeometry.listHeight(baseHeight: base, interactive: interactive, interactiveMinimum: 184, passthroughMinimum: 144)
+    }
+    func saveList(actualHeight: CGFloat, base: CGFloat) -> CGFloat {
+        HudFrameGeometry.persistedListFrame(actual: CGRect(x: 100, y: 400, width: 380, height: actualHeight), baseHeight: base).height
+    }
+    func userResize(actualHeight: CGFloat, base: CGFloat, interactive: Bool) -> CGFloat {
+        HudFrameGeometry.updatedListBaseHeight(actualHeight: actualHeight, currentBaseHeight: base, interactive: interactive, interactiveMinimum: 184, passthroughMinimum: 144)
+    }
+
+    // A：保存 144 → 交互列表 184 → 四象限 → 穿透 → 重启，基准始终 144。
+    var persisted: CGFloat = 144
+    var base = persisted                       // 重启/启动加载基准
+    var height = display(base, true)           // 进入交互列表（临时增高，不写回）
+    try check(height == 184, "交互列表显示应为 184")
+    try check(persisted == 144, "临时增高不得写回")
+    persisted = saveList(actualHeight: height, base: base)   // 点四象限：离开列表前保存
+    try check(persisted == 144, "跨四象限离开列表不应把 184 写回基准")
+    height = display(persisted, false)         // 切回穿透：进入列表恢复
+    persisted = saveList(actualHeight: height, base: base)
+    try check(height == 144 && persisted == 144, "穿透应还原并持久化 144")
+    base = persisted                           // 重启
+    try check(base == 144, "重启后基准仍为 144")
+
+    // B：用户真实调高到 300 后，跨四象限与重启持续 300。
+    base = 144; persisted = 144
+    height = display(base, true)               // 交互 184
+    base = userResize(actualHeight: 300, base: base, interactive: true)
+    persisted = saveList(actualHeight: 300, base: base)
+    try check(base == 300 && persisted == 300, "用户调高 300 应更新基准并持久化")
+    persisted = saveList(actualHeight: 300, base: base)      // 跨四象限
+    try check(persisted == 300, "跨四象限应保留用户 300")
+    height = display(persisted, false)         // 穿透
+    persisted = saveList(actualHeight: height, base: base)
+    try check(height == 300 && persisted == 300, "穿透应保留用户 300")
+    base = persisted
+    try check(base == 300, "重启后基准仍为 300")
+
+    // C：仅调宽与仅移动不得污染基准（交互显示 184，基准 144）。
+    base = 144; persisted = 144
+    height = display(base, true)
+    base = userResize(actualHeight: height, base: base, interactive: true)   // 仅调宽，高度仍 184
+    persisted = saveList(actualHeight: height, base: base)
+    try check(base == 144 && persisted == 144, "仅调宽应保留基准 144")
+    persisted = saveList(actualHeight: height, base: base)                   // 仅移动
+    try check(persisted == 144, "仅移动应保留基准 144")
 }
