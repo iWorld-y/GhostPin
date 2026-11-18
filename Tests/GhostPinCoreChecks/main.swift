@@ -105,6 +105,11 @@ let checks: [Check] = [
     ("HudFrameGeometry.listModeFrame clamps growth at screen bottom", checkHudListModeBottomEdgeClamp),
     ("HudFrameGeometry.listHeight raises saved compact size for interactive", checkHudListModeSavedOldSizeRestore),
     ("HudFrameGeometry list base height survives quadrants round-trip and restart", checkHudListBaseHeightPersistenceChain),
+    ("HudFrameGeometry collapse snaps to nearest of four edges", checkHudSnapNearestEdgeFourSides),
+    ("HudFrameGeometry snap tie-break is deterministic preferring left/right", checkHudSnapTieDeterministic),
+    ("HudFrameGeometry collapse handles multi-screen negative coordinates", checkHudSnapMultiScreenNegativeCoords),
+    ("HudFrameGeometry restoring quadrants recovers pre-collapse frame", checkHudSnapRestoreQuadrantsFrame),
+    ("HudFrameGeometry manual switch does not snap to edge", checkHudSnapManualSwitchDoesNotSnap),
     ("TodoStore sorts open items by priority then due date", checkSortsOpenItemsByPriorityThenDueDate),
     ("TodoStore sinks overdue items to bottom", checkSortsOverdueItemsToBottom),
     ("TodoStore sorts items without due date after those with", checkSortsItemsWithoutDueDateLast),
@@ -1765,4 +1770,99 @@ func checkHudListBaseHeightPersistenceChain() throws {
     try check(base == 144 && persisted == 144, "仅调宽应保留基准 144")
     persisted = saveList(actualHeight: height, base: base)                   // 仅移动
     try check(persisted == 144, "仅移动应保留基准 144")
+}
+
+func checkHudSnapNearestEdgeFourSides() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let listSize = CGSize(width: 380, height: 144)
+
+    let nearLeft = CGRect(x: 10, y: 300, width: 720, height: 592)
+    try check(HudFrameGeometry.nearestSnapEdge(frame: nearLeft, visible: a.visibleFrame) == .left, "靠近左边应选左")
+    let left = HudFrameGeometry.collapsedListFrame(current: nearLeft, targetSize: listSize, screens: [a], main: a)
+    try check(left.minX == 0 && left.size == listSize && rectContains(a.visibleFrame, left), "应贴左边缘并保持尺寸，实际: \(left)")
+
+    let nearRight = CGRect(x: 1190, y: 300, width: 720, height: 592)
+    try check(HudFrameGeometry.nearestSnapEdge(frame: nearRight, visible: a.visibleFrame) == .right, "靠近右边应选右")
+    let right = HudFrameGeometry.collapsedListFrame(current: nearRight, targetSize: listSize, screens: [a], main: a)
+    try check(right.maxX == 1920 && rectContains(a.visibleFrame, right), "应贴右边缘，实际: \(right)")
+
+    let nearBottom = CGRect(x: 600, y: 30, width: 720, height: 592)
+    try check(HudFrameGeometry.nearestSnapEdge(frame: nearBottom, visible: a.visibleFrame) == .bottom, "靠近下边应选下")
+    let bottom = HudFrameGeometry.collapsedListFrame(current: nearBottom, targetSize: listSize, screens: [a], main: a)
+    try check(bottom.minY == 25 && rectContains(a.visibleFrame, bottom), "应贴下边缘，实际: \(bottom)")
+
+    let nearTop = CGRect(x: 600, y: 480, width: 720, height: 592)
+    try check(HudFrameGeometry.nearestSnapEdge(frame: nearTop, visible: a.visibleFrame) == .top, "靠近上边应选上")
+    let top = HudFrameGeometry.collapsedListFrame(current: nearTop, targetSize: listSize, screens: [a], main: a)
+    try check(top.maxY == 1080 && rectContains(a.visibleFrame, top), "应贴上边缘，实际: \(top)")
+
+    let touching = CGRect(x: 0, y: 300, width: 720, height: 592)
+    try check(HudFrameGeometry.edgeGaps(frame: touching, visible: a.visibleFrame)[.left] == 0, "已碰边间距应为零")
+    try check(HudFrameGeometry.nearestSnapEdge(frame: touching, visible: a.visibleFrame) == .left, "碰边应优先选该边")
+}
+
+func checkHudSnapTieDeterministic() throws {
+    let wide = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    // 左右间距相等且最小 → 优先左。
+    let lrTie = CGRect(x: 10, y: 500, width: 1900, height: 100)
+    try check(HudFrameGeometry.nearestSnapEdge(frame: lrTie, visible: wide.visibleFrame) == .left, "左右平局应选左")
+
+    let square = hudScreen(CGRect(x: 0, y: 0, width: 1000, height: 1000), visible: CGRect(x: 0, y: 0, width: 1000, height: 1000))
+    // 左下相等且最小 → 优先左右边。
+    let lbTie = CGRect(x: 100, y: 100, width: 200, height: 200)
+    try check(HudFrameGeometry.nearestSnapEdge(frame: lbTie, visible: square.visibleFrame) == .left, "左下平局应优先左")
+    // 四边全相等 → 确定顺序取左。
+    let allTie = CGRect(x: 400, y: 400, width: 200, height: 200)
+    try check(HudFrameGeometry.nearestSnapEdge(frame: allTie, visible: square.visibleFrame) == .left, "四边平局应确定选左")
+}
+
+func checkHudSnapMultiScreenNegativeCoords() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let b = hudScreen(CGRect(x: -1920, y: 0, width: 1920, height: 1080), visible: CGRect(x: -1920, y: 25, width: 1920, height: 1055))
+    let listSize = CGSize(width: 380, height: 144)
+
+    // 负坐标屏 B 上靠近其左边：应选 B 并贴 B 的左缘（负坐标）。
+    let onB = CGRect(x: -1910, y: 300, width: 720, height: 592)
+    let collapsedB = HudFrameGeometry.collapsedListFrame(current: onB, targetSize: listSize, screens: [a, b], main: a)
+    try check(HudFrameGeometry.nearestSnapEdge(frame: onB, visible: b.visibleFrame) == .left, "B 屏靠近左边应选左")
+    try check(collapsedB.minX == -1920 && rectContains(b.visibleFrame, collapsedB), "应贴 B 屏负坐标左缘，实际: \(collapsedB)")
+    try check(collapsedB.maxX < 0 && collapsedB.size == listSize, "应留在 B 屏并保持尺寸")
+
+    // A 屏靠近右缘（与 B 相邻）：应贴 A 的右缘，不跨到 B。
+    let onA = CGRect(x: 1190, y: 300, width: 720, height: 592)
+    let collapsedA = HudFrameGeometry.collapsedListFrame(current: onA, targetSize: listSize, screens: [a, b], main: a)
+    try check(collapsedA.maxX == 1920 && collapsedA.minX >= 0 && rectContains(a.visibleFrame, collapsedA), "应贴 A 屏右缘不跨屏，实际: \(collapsedA)")
+}
+
+func checkHudSnapRestoreQuadrantsFrame() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let b = hudScreen(CGRect(x: -1920, y: 0, width: 1920, height: 1080), visible: CGRect(x: -1920, y: 25, width: 1920, height: 1055))
+
+    // 收起前四象限 frame 在屏内：恢复应原样还原。
+    let q = CGRect(x: 600, y: 300, width: 720, height: 592)
+    try check(HudFrameGeometry.restoredFrame(q, screens: [a, b], main: a) == q, "在屏内应原样还原四象限 frame")
+
+    // 显示器变化（原屏消失）：回退主屏并夹取。
+    let qOnB = CGRect(x: -1500, y: 300, width: 720, height: 592)
+    let fallback = HudFrameGeometry.restoredFrame(qOnB, screens: [a], main: a)
+    try check(rectContains(a.visibleFrame, fallback), "原屏消失应回退主屏夹取，实际: \(fallback)")
+
+    // 部分越界：夹取回当前屏。
+    let qOverflow = CGRect(x: 1800, y: 300, width: 720, height: 592)
+    let clamped = HudFrameGeometry.restoredFrame(qOverflow, screens: [a], main: a)
+    try check(rectContains(a.visibleFrame, clamped) && clamped.maxX == 1920, "部分越界应夹取，实际: \(clamped)")
+}
+
+func checkHudSnapManualSwitchDoesNotSnap() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let current = CGRect(x: 600, y: 300, width: 720, height: 592)
+    let listSize = CGSize(width: 380, height: 144)
+
+    // 手动切换用 switchedFrame：保留左上角，不吸边。
+    let manual = HudFrameGeometry.switchedFrame(current: current, targetSize: listSize, screens: [a], main: a)
+    try check(manual.minX == 600 && manual.maxY == 892, "手动切换应保留左上角不吸边，实际: \(manual)")
+
+    // 同一窗口自动收起则会吸边（此处最近为上边），形成对照。
+    let collapsed = HudFrameGeometry.collapsedListFrame(current: current, targetSize: listSize, screens: [a], main: a)
+    try check(collapsed.maxY == 1080 && manual.maxY != 1080, "自动收起应吸边而手动不应，实际: \(collapsed)")
 }

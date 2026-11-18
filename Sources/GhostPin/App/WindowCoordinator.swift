@@ -17,6 +17,8 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     private var isSwitchingLayout = false
     /// 列表基准高度（用户/内容选定，不含交互临时增高）；仅用户真实调高或内容适配时更新。
     private var listBaseHeight: CGFloat?
+    /// 上一次 updateHUD 时的 HUD 模式，用于区分「收起后恢复四象限」与手动视图切换。
+    private var lastHudMode: HudMode = .passthrough
 
     var isBoardVisible: Bool {
         boardWindow?.isVisible == true
@@ -36,6 +38,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             currentLayout = view
             let savedFrame = framePreference(for: view)
             listBaseHeight = appState.preferences.hudFrame?.height
+            lastHudMode = appState.preferences.hudMode
             let interactive = appState.preferences.hudMode == .interactive
             let defaultSize = view == .quadrants
                 ? DesktopNotesBoardView.quadrantsDefaultSize
@@ -137,6 +140,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             ? [.canJoinAllSpaces, .fullScreenAuxiliary]
             : []
         boardWindow.level = appState.preferences.keepBoardOnTop == true ? .floating : .normal
+        lastHudMode = appState.preferences.hudMode
     }
 
     /// 记录指针是否位于 HUD 内。是否隐身始终由「模式 + 该事实」推导，不保留跨模式的中间状态。
@@ -148,8 +152,8 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         applyHUDAlpha()
     }
 
-    /// 按生效视图切换窗口尺寸：保留当前左上角，目标布局仅取已保存尺寸（缺省用默认值），
-    /// 在当前屏可用区内夹取，避免跳回旧位置或旧显示器。
+    /// 按生效视图切换窗口尺寸：一般切换保留当前左上角、目标仅取尺寸并夹取；
+    /// 交互四象限→穿透列表自动贴当前屏可用区最近边；收起后恢复四象限还原收起前 frame。
     private func applyHudLayout() {
         guard let appState, let boardWindow else {
             return
@@ -160,6 +164,10 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         }
         saveBoardFrame()
         let oldFrame = boardWindow.frame
+        let mode = appState.preferences.hudMode
+        // 仅交互四象限→穿透列表自动贴边；收起后再次进入交互恢复四象限还原收起前 frame。
+        let collapsingToPassthroughList = currentLayout == .quadrants && target == .list && mode == .passthrough
+        let restoringCollapsedQuadrants = currentLayout == .list && target == .quadrants && mode == .interactive && lastHudMode == .passthrough
         currentLayout = target
         needsInitialHUDHeight = false
 
@@ -168,17 +176,29 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         if target == .list {
             size.height = HudFrameGeometry.listHeight(
                 baseHeight: size.height,
-                interactive: appState.preferences.hudMode == .interactive,
+                interactive: mode == .interactive,
                 interactiveMinimum: DesktopNotesBoardView.interactiveMinimumSize.height,
                 passthroughMinimum: DesktopNotesBoardView.minimumSize.height
             )
         }
-        let frame = HudFrameGeometry.switchedFrame(
-            current: oldFrame,
-            targetSize: size,
-            screens: Self.hudScreens(),
-            main: Self.mainHudScreen()
-        )
+        let frame: CGRect
+        if collapsingToPassthroughList {
+            frame = HudFrameGeometry.collapsedListFrame(
+                current: oldFrame,
+                targetSize: size,
+                screens: Self.hudScreens(),
+                main: Self.mainHudScreen()
+            )
+        } else if restoringCollapsedQuadrants, let saved {
+            frame = HudFrameGeometry.restoredFrame(saved.nsRect, screens: Self.hudScreens(), main: Self.mainHudScreen())
+        } else {
+            frame = HudFrameGeometry.switchedFrame(
+                current: oldFrame,
+                targetSize: size,
+                screens: Self.hudScreens(),
+                main: Self.mainHudScreen()
+            )
+        }
         needsInitialHUDHeight = target == .list && saved == nil
 
         // minSize 变化可能触发 resize，与 setFrame 一起纳入切换保护。

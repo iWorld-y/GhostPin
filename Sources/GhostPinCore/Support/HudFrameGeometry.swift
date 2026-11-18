@@ -102,4 +102,66 @@ public enum HudFrameGeometry {
     public static func persistedListFrame(actual: CGRect, baseHeight: CGFloat) -> CGRect {
         CGRect(origin: CGPoint(x: actual.minX, y: actual.minY), size: CGSize(width: actual.width, height: baseHeight))
     }
+
+    /// 收起前窗口四条边到可用区对应边的间距；已碰边（含越界）算零。
+    public static func edgeGaps(frame: CGRect, visible: CGRect) -> [HudSnapEdge: CGFloat] {
+        [
+            .left: max(0, frame.minX - visible.minX),
+            .right: max(0, visible.maxX - frame.maxX),
+            .bottom: max(0, frame.minY - visible.minY),
+            .top: max(0, visible.maxY - frame.maxY)
+        ]
+    }
+
+    /// 选间距最小的边；平局按 left、right、bottom、top 的确定顺序取前者（优先左右边）。
+    public static func nearestSnapEdge(frame: CGRect, visible: CGRect) -> HudSnapEdge {
+        let gaps = edgeGaps(frame: frame, visible: visible)
+        let order: [HudSnapEdge] = [.left, .right, .bottom, .top]
+        var best = order[0]
+        var bestGap = gaps[best] ?? 0
+        for edge in order.dropFirst() {
+            let gap = gaps[edge] ?? 0
+            if gap < bestGap {
+                best = edge
+                bestGap = gap
+            }
+        }
+        return best
+    }
+
+    /// 贴到所选可用区边缘：所选轴贴边，另一轴尽量保持原位置并夹取，尺寸保持。
+    public static func snappedFrame(frame: CGRect, edge: HudSnapEdge, visible: CGRect) -> CGRect {
+        var result = frame
+        switch edge {
+        case .left:
+            result.origin.x = visible.minX
+        case .right:
+            result.origin.x = visible.maxX - result.width
+        case .bottom:
+            result.origin.y = visible.minY
+        case .top:
+            result.origin.y = visible.maxY - result.height
+        }
+        return clamped(result, into: visible)
+    }
+
+    /// 交互四象限→穿透列表的收起：以收起前窗口选当前屏可用区最近边，
+    /// 列表按目标尺寸保留左上角后贴到该边，另一轴夹取，保持可见与已选尺寸。
+    public static func collapsedListFrame(current: CGRect, targetSize: CGSize, screens: [HudScreen], main: HudScreen?) -> CGRect {
+        let listFrame = switchedFrame(current: current, targetSize: targetSize, screens: screens, main: main)
+        let screen = bestScreenIndex(for: current, screens: screens).map { screens[$0] } ?? main
+        guard let screen else {
+            return listFrame
+        }
+        let edge = nearestSnapEdge(frame: current, visible: screen.visibleFrame)
+        return snappedFrame(frame: listFrame, edge: edge, visible: screen.visibleFrame)
+    }
+}
+
+/// HUD 收起贴边的可选边缘。
+public enum HudSnapEdge: String, CaseIterable, Sendable {
+    case left
+    case right
+    case bottom
+    case top
 }
