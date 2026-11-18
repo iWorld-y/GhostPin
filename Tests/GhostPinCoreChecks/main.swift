@@ -1935,22 +1935,30 @@ func checkHudManualCollapseNoHistoryContentFit() throws {
     let collapsed = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: provisionalHeight), screens: [a], main: a)
     try check(collapsed.minY == 25 && collapsed.height == 460, "无历史收起应先贴底")
 
-    // 首次内容适配实测交互空列表 184：基准按实测全高建立，显示 184 并沿下边重对齐。
+    // 首次内容适配实测交互空列表 184：调用实际基准选择逻辑，偏好基准应为穿透最小值 144，
+    // 窗口仍显示 184 并沿下边重对齐。
     let fitted = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 184, snapEdge: .bottom, screens: [a], main: a)
-    try check(fitted.height == 184 && fitted.minY == 25, "内容适配后应贴底且工具栏可见，实际: \(fitted)")
-    let persisted = HudFrameGeometry.persistedListFrame(actual: fitted, baseHeight: 184)
-    try check(persisted.height == 184 && persisted.minY == 25, "应持久化实测基准与贴底位置")
-    // 同模式下一次刷新不丢高度。
-    let refreshed = HudFrameGeometry.listModeFrame(current: fitted, baseHeight: 184, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144, screens: [a], main: a)
-    try check(refreshed.height == 184, "同模式刷新应保持 184")
-    let restarted = HudFrameGeometry.restoredFrame(persisted, screens: [a], main: a)
-    try check(restarted.height == 184 && restarted.minY == 25, "重启应恢复实测高度与贴底位置，实际: \(restarted)")
+    try check(fitted.height == 184 && fitted.minY == 25, "交互显示应 184 且贴底，实际: \(fitted)")
+    let base = HudFrameGeometry.firstFitBaseHeight(measuredHeight: 184, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
+    try check(base == 144, "无历史交互空列表首次测量偏好基准应为 144")
+    let persisted = HudFrameGeometry.persistedListFrame(actual: fitted, baseHeight: base)
+    try check(persisted.height == 144 && persisted.minY == 25, "应持久化基准 144 与贴底位置")
+    // 同模式刷新与重启仍显示 184。
+    let refreshed = HudFrameGeometry.listModeFrame(current: fitted, baseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144, screens: [a], main: a)
+    try check(refreshed.height == 184, "同模式刷新应保持显示 184")
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 184, "同模式重启应显示 184")
+    // 随后穿透还原紧凑 144。
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 144, "随后穿透应为 144")
+    let passthrough = HudFrameGeometry.listModeFrame(current: fitted, baseHeight: base, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144, screens: [a], main: a)
+    try check(passthrough.height == 144, "穿透切换应还原 144")
 
-    // 初次适配超过最小值（如有任务实测 340）：同模式刷新与重启不丢高度。
+    // 初次适配超过最小值（如有任务实测 340）：基准存实测全高，同模式刷新与重启不丢高度。
+    let tallBase = HudFrameGeometry.firstFitBaseHeight(measuredHeight: 340, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
+    try check(tallBase == 340, "实测超最小值应存全高 340")
     let tall = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 340, snapEdge: .bottom, screens: [a], main: a)
     try check(tall.height == 340 && tall.minY == 25, "超最小值内容适配应贴底")
-    try check(HudFrameGeometry.listHeight(baseHeight: 340, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 340, "同模式刷新应保持 340")
-    let tallRestart = HudFrameGeometry.restoredFrame(HudFrameGeometry.persistedListFrame(actual: tall, baseHeight: 340), screens: [a], main: a)
+    try check(HudFrameGeometry.listHeight(baseHeight: tallBase, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 340, "同模式刷新应保持 340")
+    let tallRestart = HudFrameGeometry.restoredFrame(HudFrameGeometry.persistedListFrame(actual: tall, baseHeight: tallBase), screens: [a], main: a)
     try check(tallRestart.height == 340, "重启应保持 340 不丢高度")
 }
 

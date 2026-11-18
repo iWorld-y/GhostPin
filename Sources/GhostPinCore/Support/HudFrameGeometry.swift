@@ -75,6 +75,16 @@ public enum HudFrameGeometry {
         max(baseHeight, interactive ? interactiveMinimum : passthroughMinimum)
     }
 
+    /// 无历史尺寸初次自动内容测量的基准选择：仅当前交互且实测恰为交互最小值（空列表含工具栏）时，
+    /// 持久化基准取穿透最小值（紧凑），实际窗口仍显示实测全高；实测超过交互最小值则存实测全高。
+    /// 已有/用户主动设置的尺寸不走此路径，原意维持。
+    public static func firstFitBaseHeight(measuredHeight: CGFloat, interactive: Bool, interactiveMinimum: CGFloat, passthroughMinimum: CGFloat) -> CGFloat {
+        if interactive && measuredHeight == interactiveMinimum {
+            return passthroughMinimum
+        }
+        return measuredHeight
+    }
+
     /// 列表模式切换的目标 frame：以有效高度保留当前左上角，并夹取进当前屏可用区。
     public static func listModeFrame(current: CGRect, baseHeight: CGFloat, interactive: Bool, interactiveMinimum: CGFloat, passthroughMinimum: CGFloat, screens: [HudScreen], main: HudScreen?) -> CGRect {
         let targetHeight = listHeight(baseHeight: baseHeight, interactive: interactive, interactiveMinimum: interactiveMinimum, passthroughMinimum: passthroughMinimum)
