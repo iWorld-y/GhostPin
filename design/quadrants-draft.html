@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GhostPin · 四象限待办草案</title>
+  <style>
+/* OD-LAYOUT-PRIMITIVES v1 — structure only: display, flex/grid, overflow, wrapping, ratio, geometry.
+   Put this @layer first; product CSS outside the layer wins ordinary layout rules.
+   Native hidden and closed-dialog states take precedence over component display rules. */
+@layer od-layout {
+  [hidden]:not([hidden="until-found" i]) { display: none !important; }
+  dialog:not([open]) { display: none !important; }
+
+  :where(.od-stack,.od-row,.od-row-top,.od-cluster,.od-grid,.od-field,.od-stat,.od-cell,.od-tile) > :where(*) { min-width: 0; }
+
+  /* containers */
+  .od-stack   { display: flex; flex-direction: column; gap: var(--od-gap, 8px); }
+  .od-row     { display: flex; align-items: center; gap: var(--od-gap, 8px); }
+  .od-row-top { display: flex; align-items: flex-start; gap: var(--od-gap, 8px); }
+  .od-cluster { display: flex; flex-wrap: wrap; align-items: center; gap: var(--od-gap, 8px); }
+  .od-fill    { flex: 1 1 0; min-width: 0; }
+  .od-fixed   { flex: none; }
+  .od-grid    { display: grid; gap: var(--od-gap, 12px); grid-template-columns: repeat(var(--od-cols, 3), minmax(0, 1fr)); }
+
+  /* stacked information: each piece is its own line — never sibling inline spans */
+  .od-stat, .od-field, .od-cell { display: grid; gap: var(--od-gap, 2px); }
+  :where(.od-stat,.od-field,.od-cell) > :where(*) { display: block; }
+  .od-tile { display: grid; grid-template-rows: auto 1fr; }
+  :where(.od-tile) > :where(*) { display: block; }
+
+  /* media keeps its intrinsic ratio by default; never a distorted or cropped
+     cover by accident. height:auto lets the ratio win over an <img height="…">
+     attribute. Cropping to a uniform box is an explicit opt-in: set --od-ratio
+     AND add .od-media-cover together (per the core rule, only where a crop is
+     deliberate — tile thumbs, decorative backdrops, and so on). */
+  .od-media { display: block; width: 100%; height: auto; aspect-ratio: var(--od-ratio, auto); }
+  .od-media-cover { object-fit: cover; }
+
+  /* functional inline SVG icons opt into bounded geometry; content SVGs keep their own */
+  .od-icon { display: inline-block; inline-size: var(--od-icon-size, 1em); block-size: var(--od-icon-size, 1em); flex: none; }
+
+  /* data text only — authored copy is rewritten to its budget instead */
+  .od-truncate { display: block; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .od-clamp-2, .od-clamp-3 { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .od-clamp-2 { -webkit-line-clamp: 2; }
+  .od-clamp-3 { -webkit-line-clamp: 3; }
+  .od-lines-2 { min-height: calc(2 * 1.4em); }
+  .od-nowrap { white-space: nowrap; }
+  .od-keep { word-break: keep-all; overflow-wrap: anywhere; }
+
+  /* screen skeleton: bars take their own space */
+  .od-screen { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100%; }
+  .od-scroll { overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+
+  /* horizontal rail */
+  .od-rail { display: flex; gap: var(--od-gap, 8px); overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none;
+             padding-inline: var(--od-rail-pad, 16px); scroll-padding-inline: var(--od-rail-pad, 16px); }
+  .od-rail::-webkit-scrollbar { display: none; }
+  :where(.od-rail) > :where(*) { flex: none; scroll-snap-align: start; }
+  :where(.od-rail) > :where(:last-child) { margin-inline-end: var(--od-rail-pad, 16px); }
+
+  .od-spacer { flex: none; visibility: hidden; pointer-events: none; }
+  .od-touch { min-width: 44px; min-height: 44px; }
+}
+:root [hidden]:where(:not([hidden="until-found" i])) { display: none; }
+/* /OD-LAYOUT-PRIMITIVES v1 */
+  </style>
+  <link rel="stylesheet" href="styles/tokens.css">
+  <link rel="stylesheet" href="styles/components.css">
+  <link rel="stylesheet" href="styles/quadrants.css">
+  <script src="scripts/model.js" defer></script>
+  <script src="scripts/components.js" defer></script>
+  <script src="scripts/quadrants-model.js" defer></script>
+  <script src="scripts/quadrants.js" defer></script>
+</head>
+<body data-theme="light">
+  <div class="draft-shell">
+    <header class="draft-header">
+      <h1>四象限待办草案</h1>
+      <p>GhostPin · macOS</p>
+      <a href="index.html">查看现有基线</a>
+    </header>
+    <main>
+      <section class="draft-stage" aria-label="GhostPin 桌面便签草案">
+        <section class="hud quadrants-hud interactive" id="board" data-view="quadrants" aria-label="GhostPin 待办">
+          <header class="hud-header">
+            <img class="logo" src="assets/GhostPinLogo.png" width="1254" height="1254" alt="">
+            <span class="hud-brand">GhostPin</span>
+            <span class="hud-count" id="board-count"></span>
+            <button class="hud-close" type="button" data-action="hide" aria-label="隐藏桌面便签">
+              <svg class="od-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg>
+            </button>
+          </header>
+          <div class="view-toolbar">
+            <div class="view-switch" role="group" aria-label="待办视图">
+              <button type="button" data-view-button="list" aria-pressed="false" aria-controls="board-content">单列</button>
+              <button type="button" data-view-button="quadrants" aria-pressed="true" aria-controls="board-content">四象限</button>
+            </div>
+            <label class="scope-control" for="scope">
+              <span>范围</span>
+              <select id="scope">
+                <option value="all">全部未完成</option>
+                <option value="today">今天新增</option>
+              </select>
+            </label>
+          </div>
+          <div id="board-content">
+            <noscript><p class="list-empty">请启用 JavaScript，以查看和操作示例任务。</p></noscript>
+          </div>
+          <footer class="hud-footer">
+            <span class="mode-label"><span class="mode-dot" aria-hidden="true"></span>交互模式</span>
+            <span id="footer-count" aria-label="已显示任务数与全部任务数"></span>
+            <span id="footer-scope">全部未完成</span>
+          </footer>
+        </section>
+        <div class="hidden-board" id="hidden-board" hidden>
+          <p>桌面便签已隐藏</p>
+          <button type="button" class="draft-button" id="show-board">显示桌面便签</button>
+        </div>
+      </section>
+      <p class="draft-feedback" id="draft-feedback" role="status" aria-live="polite" aria-atomic="true">示例任务。点击圆钮推进状态，点击标题查看完整内容。</p>
+      <details class="draft-notes">
+        <summary>草案说明与示例状态</summary>
+        <div class="draft-notes-body">
+          <div class="review-controls" aria-label="草案演示控件">
+            <label for="scene"><span>示例状态</span><select id="scene">
+              <option value="normal">默认分布</option>
+              <option value="one-empty">一个象限为空</option>
+              <option value="overflow">任务较多</option>
+              <option value="empty">全部为空</option>
+            </select></label>
+            <label for="theme"><span>外观</span><select id="theme">
+              <option value="light">浅色</option>
+              <option value="dark">深色</option>
+            </select></label>
+            <button type="button" class="draft-button" id="reset-scene">重置示例</button>
+          </div>
+          <label class="focus-option" for="focus-doing">
+            <input id="focus-doing" type="checkbox" checked disabled>
+            <span>单列中有 Doing 时只显示 Doing</span>
+            <small>四象限始终显示全部未完成任务。</small>
+          </label>
+          <table class="rule-table">
+            <caption hidden>四象限自动分类规则</caption>
+            <tbody>
+              <tr><th scope="row">重要程度</th><td>高优先级为重要，中、低优先级为一般。</td></tr>
+              <tr><th scope="row">紧急程度</th><td>已逾期或今天到期为紧急。明天及以后到期，或未设置截止日期，为不紧急。</td></tr>
+              <tr><th scope="row">任务状态</th><td>每个象限内 Doing 在 Todo 前面。状态仍按 Todo → Doing → Done 推进，完成后移除，保留 500ms 点击冷却。</td></tr>
+              <tr><th scope="row">显示范围</th><td>“今天新增”按创建时间筛选。四象限不截断任务数量，每区独立滚动。单列沿用默认最多 8 条的规则。</td></tr>
+            </tbody>
+          </table>
+          <p>草案沿用现有系统字体、紧凑任务行和浅深色材质。桌面四象限宽 720px，单列宽 380px。逾期任务保留原有的标题划线和日期提示。</p>
+          <p class="compact-note">当前窗口较窄，四个象限按优先处理、安排时间、及时处理、稍后处理的顺序排列。</p>
+          <p>任务只存在于当前页面，刷新会恢复示例。参考时间固定为 2026 年 11 月 17 日 14:30（北京时间），用于展示今天到期、未来到期和逾期。上述示例与外观控件属于草案演示区。</p>
+          <p>分类会根据任务的优先级和截止日期计算。首版不提供拖拽修改象限。本草案不连接实际任务、Agent 或系统快捷键。</p>
+        </div>
+      </details>
+    </main>
+  </div>
+  <dialog class="task-dialog" id="task-detail" aria-labelledby="detail-heading">
+    <header class="dialog-header">
+      <h2 id="detail-heading">任务详情</h2>
+      <button type="button" class="draft-button" id="close-detail">关闭</button>
+    </header>
+    <div class="dialog-body" id="detail-body"></div>
+  </dialog>
+</body>
+</html>
