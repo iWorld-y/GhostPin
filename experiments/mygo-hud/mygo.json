@@ -1,0 +1,9 @@
+{
+  "name": "GhostPin MyGo HUD",
+  "identifier": "dev.ghostpin.experiment.mygo-hud",
+  "version": "0.1.0",
+  "macos": {
+    "minimumSystemVersion": "14.0",
+    "infoPlist": { "LSUIElement": true }
+  }
+}
