@@ -1,5 +1,11 @@
 import AppKit
+import OSLog
 import SwiftUI
+import GhostPinCore
+
+#if DEBUG
+private let hudLogger = Logger(subsystem: "com.oyuxi.TodoPin", category: "HUD")
+#endif
 
 @MainActor
 final class WindowCoordinator: NSObject, NSWindowDelegate {
@@ -7,6 +13,21 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     private var boardWindow: NSWindow?
     private var isPointerInsideHUD = false
     private var needsInitialHUDHeight = false
+    private var currentLayout: HudView = .list
+    private var isSwitchingLayout = false
+    /// 列表基准高度（用户/内容选定，不含交互临时增高）；仅用户真实调高或内容适配时更新。
+    private var listBaseHeight: CGFloat?
+    /// 上一次 updateHUD 时的 HUD 模式，用于区分「收起后恢复四象限」与手动视图切换。
+    private var lastHudMode: HudMode = .passthrough
+    /// 收起时所选贴边（仅无历史列表尺寸、待内容适配时暂存）；最终尺寸确定后消费，手动切换/重新展开/用户调整时清除。
+    private var pendingSnapEdge: HudSnapEdge?
+    #if DEBUG
+    /// 几何自测注入的合成屏幕，避免读取用户显示器信息；仅 DEBUG 自测使用。
+    static var testScreens: [HudScreen]?
+    static var testMainScreen: HudScreen?
+    /// 几何自测态：短路指针位置、激活/显示等桌面副作用。
+    static var isGeometrySelfTest = false
+    #endif
 
     var isBoardVisible: Bool {
         boardWindow?.isVisible == true
@@ -22,9 +43,17 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         }
 
         if boardWindow == nil {
-            let savedFrame = appState.preferences.hudFrame
+            let view = appState.preferences.effectiveHudView
+            currentLayout = view
+            let savedFrame = framePreference(for: view)
+            listBaseHeight = appState.preferences.hudFrame?.height
+            lastHudMode = appState.preferences.hudMode
+            let interactive = appState.preferences.hudMode == .interactive
+            let defaultSize = view == .quadrants
+                ? DesktopNotesBoardView.quadrantsDefaultSize
+                : NSSize(width: DesktopNotesBoardView.defaultWidth, height: 460)
             let window = HUDPanel(
-                contentRect: NSRect(x: 0, y: 0, width: DesktopNotesBoardView.defaultWidth, height: 460),
+                contentRect: NSRect(origin: .zero, size: defaultSize),
                 styleMask: [.borderless, .resizable],
                 backing: .buffered,
                 defer: false
@@ -35,17 +64,30 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             window.backgroundColor = .clear
             window.isMovableByWindowBackground = true
             window.hidesOnDeactivate = false
-            window.minSize = DesktopNotesBoardView.minimumSize
+            window.minSize = minimumSize(for: view, interactive: interactive)
             if let savedFrame {
-                window.setFrame(savedFrame.nsRect, display: false)
-                if !Self.frameIntersectsAnyScreen(savedFrame.nsRect) {
-                    window.center()
+                var rect = savedFrame.nsRect
+                if view == .list {
+                    // 交互列表遇到旧的紧凑尺寸时，先按交互最小值算出目标高度再夹取。
+                    rect.size.height = HudFrameGeometry.listHeight(
+                        baseHeight: rect.height,
+                        interactive: interactive,
+                        interactiveMinimum: DesktopNotesBoardView.interactiveMinimumSize.height,
+                        passthroughMinimum: DesktopNotesBoardView.minimumSize.height
+                    )
                 }
+                window.setFrame(
+                    HudFrameGeometry.restoredFrame(rect, screens: Self.hudScreens(), main: Self.mainHudScreen()),
+                    display: false
+                )
             } else {
                 window.center()
             }
             boardWindow = window
-            needsInitialHUDHeight = savedFrame == nil
+            needsInitialHUDHeight = view == .list && savedFrame == nil
+            #if DEBUG
+            hudLogger.info("showBoard view=\(view.rawValue, privacy: .public) frame=\(NSStringFromRect(window.frame), privacy: .public)")
+            #endif
         }
 
         boardWindow?.contentView = NSHostingView(
@@ -65,15 +107,34 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
 
     /// 首次展示且未保存尺寸时采用内容高度，之后由用户调整并持久化窗口尺寸。
     private func applyInitialHUDHeight(_ height: CGFloat) {
-        guard needsInitialHUDHeight, let boardWindow else {
+        guard needsInitialHUDHeight, currentLayout == .list, let appState, let boardWindow else {
             return
         }
         needsInitialHUDHeight = false
-        let height = max(height, DesktopNotesBoardView.minimumSize.height)
-        var frame = boardWindow.frame
-        frame.origin.y += frame.height - height
-        frame.size.height = height
+        let interactive = appState.preferences.hudMode == .interactive
+        let minHeight = minimumSize(for: .list, interactive: interactive).height
+        let measured = max(height, minHeight)
+        // 无历史初次测量：交互空列表实测恰为交互最小值时基准取穿透最小值（紧凑），
+        // 窗口仍显示实测全高；实测超过最小值则存全高，同模式刷新与重启不丢高度。
+        listBaseHeight = HudFrameGeometry.firstFitBaseHeight(
+            measuredHeight: measured,
+            interactive: interactive,
+            interactiveMinimum: DesktopNotesBoardView.interactiveMinimumSize.height,
+            passthroughMinimum: DesktopNotesBoardView.minimumSize.height
+        )
+        // 最终尺寸确定后沿收起所选边重新对齐并夹取，避免收缩后脱离边缘。
+        let frame = HudFrameGeometry.contentFittedListFrame(
+            current: boardWindow.frame,
+            finalHeight: measured,
+            snapEdge: pendingSnapEdge,
+            screens: Self.hudScreens(),
+            main: Self.mainHudScreen()
+        )
+        pendingSnapEdge = nil
+        isSwitchingLayout = true
         boardWindow.setFrame(frame, display: true)
+        isSwitchingLayout = false
+        saveBoardFrame()
     }
 
     func hideBoard() {
@@ -92,14 +153,25 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         guard let appState, let boardWindow else {
             return
         }
+        applyHudLayout()
+        applyHudModeMetrics()
         let interactive = appState.preferences.hudMode == .interactive
         boardWindow.ignoresMouseEvents = !interactive
+        #if DEBUG
+        if Self.isGeometrySelfTest {
+            isPointerInsideHUD = false
+        } else {
+            isPointerInsideHUD = boardWindow.frame.contains(NSEvent.mouseLocation)
+        }
+        #else
         isPointerInsideHUD = boardWindow.frame.contains(NSEvent.mouseLocation)
+        #endif
         boardWindow.alphaValue = targetHUDAlpha()
         boardWindow.collectionBehavior = appState.preferences.hudAllSpaces
             ? [.canJoinAllSpaces, .fullScreenAuxiliary]
             : []
         boardWindow.level = appState.preferences.keepBoardOnTop == true ? .floating : .normal
+        lastHudMode = appState.preferences.hudMode
     }
 
     /// 记录指针是否位于 HUD 内。是否隐身始终由「模式 + 该事实」推导，不保留跨模式的中间状态。
@@ -109,6 +181,147 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         }
         isPointerInsideHUD = inside
         applyHUDAlpha()
+    }
+
+    /// 按生效视图切换窗口尺寸：一般切换保留当前左上角、目标仅取尺寸并夹取；
+    /// 四象限收为列表（交互手动「单列」与穿透收起）自动贴当前屏可用区最近边；收起后恢复四象限还原收起前 frame。
+    private func applyHudLayout() {
+        guard let appState, let boardWindow else {
+            return
+        }
+        let target = appState.preferences.effectiveHudView
+        guard target != currentLayout else {
+            return
+        }
+        saveBoardFrame()
+        let oldFrame = boardWindow.frame
+        let mode = appState.preferences.hudMode
+        // 四象限收为列表（交互手动「单列」与穿透收起）都贴最近边；收起后恢复四象限还原收起前 frame。
+        let collapsingQuadrantsToList = currentLayout == .quadrants && target == .list
+        let restoringCollapsedQuadrants = currentLayout == .list && target == .quadrants && mode == .interactive && lastHudMode == .passthrough
+        currentLayout = target
+        needsInitialHUDHeight = false
+        pendingSnapEdge = nil
+
+        let saved = framePreference(for: target)
+        var size = saved.map { NSSize(width: $0.width, height: $0.height) } ?? defaultSize(for: target)
+        if target == .list {
+            size.height = HudFrameGeometry.listHeight(
+                baseHeight: size.height,
+                interactive: mode == .interactive,
+                interactiveMinimum: DesktopNotesBoardView.interactiveMinimumSize.height,
+                passthroughMinimum: DesktopNotesBoardView.minimumSize.height
+            )
+        }
+        let frame: CGRect
+        if collapsingQuadrantsToList {
+            frame = HudFrameGeometry.collapsedListFrame(
+                current: oldFrame,
+                targetSize: size,
+                screens: Self.hudScreens(),
+                main: Self.mainHudScreen()
+            )
+            // 无历史列表尺寸时随后会内容适配，暂存所选边以便最终尺寸确定后重对齐。
+            if saved == nil, let screen = Self.screen(for: oldFrame) {
+                pendingSnapEdge = HudFrameGeometry.collapseSide(frame: oldFrame, visible: screen.visibleFrame)
+            }
+        } else if restoringCollapsedQuadrants, let saved {
+            frame = HudFrameGeometry.restoredFrame(saved.nsRect, screens: Self.hudScreens(), main: Self.mainHudScreen())
+        } else {
+            frame = HudFrameGeometry.switchedFrame(
+                current: oldFrame,
+                targetSize: size,
+                screens: Self.hudScreens(),
+                main: Self.mainHudScreen()
+            )
+        }
+        needsInitialHUDHeight = target == .list && saved == nil
+
+        // minSize 变化可能触发 resize，与 setFrame 一起纳入切换保护。
+        isSwitchingLayout = true
+        boardWindow.minSize = minimumSize(for: target, interactive: appState.preferences.hudMode == .interactive)
+        boardWindow.setFrame(frame, display: true)
+        isSwitchingLayout = false
+        saveBoardFrame()
+        #if DEBUG
+        hudLogger.info("layout view=\(target.rawValue, privacy: .public) frame=\(NSStringFromRect(frame), privacy: .public)")
+        #endif
+    }
+
+    /// 同一布局内模式变化（穿透列表↔交互列表）：目标高度取持久化列表基准高度与模式最小值的较大者，
+    /// 交互保证工具栏/空状态高度，穿透还原紧凑高度；用户主动调高的尺寸保留。
+    /// 调整保留左上角并夹取进当前屏可用区，不写回偏好。
+    private func applyHudModeMetrics() {
+        guard let appState, let boardWindow, currentLayout == .list else {
+            return
+        }
+        let interactive = appState.preferences.hudMode == .interactive
+        let required = minimumSize(for: .list, interactive: interactive)
+        let baseHeight = listBaseHeight ?? boardWindow.frame.height
+        let target = HudFrameGeometry.listModeFrame(
+            current: boardWindow.frame,
+            baseHeight: baseHeight,
+            interactive: interactive,
+            interactiveMinimum: DesktopNotesBoardView.interactiveMinimumSize.height,
+            passthroughMinimum: DesktopNotesBoardView.minimumSize.height,
+            screens: Self.hudScreens(),
+            main: Self.mainHudScreen()
+        )
+        guard boardWindow.minSize != required || boardWindow.frame != target else {
+            return
+        }
+        isSwitchingLayout = true
+        boardWindow.minSize = required
+        if boardWindow.frame != target {
+            boardWindow.setFrame(target, display: true)
+        }
+        isSwitchingLayout = false
+    }
+
+    private func framePreference(for view: HudView) -> HudWindowFrame? {
+        guard let appState else {
+            return nil
+        }
+        return view == .quadrants ? appState.preferences.hudQuadrantsFrame : appState.preferences.hudFrame
+    }
+
+    private func defaultSize(for view: HudView) -> NSSize {
+        view == .quadrants
+            ? DesktopNotesBoardView.quadrantsDefaultSize
+            : NSSize(width: DesktopNotesBoardView.defaultWidth, height: 460)
+    }
+
+    private func minimumSize(for view: HudView, interactive: Bool) -> NSSize {
+        if view == .quadrants {
+            return DesktopNotesBoardView.quadrantsMinimumSize
+        }
+        return interactive ? DesktopNotesBoardView.interactiveMinimumSize : DesktopNotesBoardView.minimumSize
+    }
+
+    private static func hudScreens() -> [HudScreen] {
+        #if DEBUG
+        if let testScreens {
+            return testScreens
+        }
+        #endif
+        return NSScreen.screens.map { HudScreen(frame: $0.frame, visibleFrame: $0.visibleFrame) }
+    }
+
+    private static func mainHudScreen() -> HudScreen? {
+        #if DEBUG
+        if let testMainScreen {
+            return testMainScreen
+        }
+        #endif
+        return NSScreen.main.map { HudScreen(frame: $0.frame, visibleFrame: $0.visibleFrame) }
+    }
+
+    private static func screen(for frame: CGRect) -> HudScreen? {
+        let screens = hudScreens()
+        if let index = HudFrameGeometry.bestScreenIndex(for: frame, screens: screens) {
+            return screens[index]
+        }
+        return mainHudScreen()
     }
 
     /// 目标不透明度：穿透模式下指针位于 HUD 内即完全不可见，其余情况用偏好值。
@@ -141,6 +354,11 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     }
 
     func applyHUDInteraction() {
+        #if DEBUG
+        if Self.isGeometrySelfTest {
+            return
+        }
+        #endif
         guard let appState, let boardWindow else {
             return
         }
@@ -160,29 +378,129 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
+        guard !isSwitchingLayout else { return }
+        pendingSnapEdge = nil
         saveBoardFrame()
     }
 
     func windowDidResize(_ notification: Notification) {
+        guard !isSwitchingLayout, let appState, let boardWindow else { return }
+        pendingSnapEdge = nil
+        if currentLayout == .list {
+            // 仅当高度偏离当前显示高度时才视为用户真实调高；仅调宽/程序化显示保留基准。
+            listBaseHeight = HudFrameGeometry.updatedListBaseHeight(
+                actualHeight: boardWindow.frame.height,
+                currentBaseHeight: listBaseHeight ?? boardWindow.frame.height,
+                interactive: appState.preferences.hudMode == .interactive,
+                interactiveMinimum: DesktopNotesBoardView.interactiveMinimumSize.height,
+                passthroughMinimum: DesktopNotesBoardView.minimumSize.height
+            )
+        }
         saveBoardFrame()
     }
 
+    /// 缩放与移动回调按当前视图保存：四象限存完整 frame；列表位置/宽度取实际值，
+    /// 高度始终存基准高度，避免把交互临时增高、仅移动/仅调宽写回基准。
     private func saveBoardFrame() {
         guard let boardWindow, let appState else {
             return
         }
         let frame = boardWindow.frame
-        appState.preferences.hudFrame = HudWindowFrame(
-            x: frame.origin.x,
-            y: frame.origin.y,
-            width: frame.size.width,
-            height: frame.size.height
-        )
+        if currentLayout == .quadrants {
+            appState.preferences.hudQuadrantsFrame = HudWindowFrame(
+                x: frame.origin.x,
+                y: frame.origin.y,
+                width: frame.size.width,
+                height: frame.size.height
+            )
+        } else {
+            let persisted = HudFrameGeometry.persistedListFrame(actual: frame, baseHeight: listBaseHeight ?? frame.height)
+            appState.preferences.hudFrame = HudWindowFrame(
+                x: persisted.minX,
+                y: persisted.minY,
+                width: persisted.width,
+                height: persisted.height
+            )
+        }
     }
 
-    private static func frameIntersectsAnyScreen(_ frame: NSRect) -> Bool {
-        NSScreen.screens.contains { $0.frame.intersects(frame) }
+    #if DEBUG
+    /// 几何自测：以合成屏幕经真实公开切换方法（setHudInteractiveView/toggleHUDMode）驱动，
+    /// 测试态短路指针/激活/显示副作用，runloop 处理后读取隐藏 panel 稳定 frame 并校验固定矩形。
+    /// 不显示/不激活窗口、不读用户显示器或指针；缺失/错误 frame 返回 false（调用方 exit 非零）。
+    func runGeometrySelfTest() -> Bool {
+        guard let appState else { return false }
+        Self.isGeometrySelfTest = true
+        let visible = CGRect(x: 0, y: 0, width: 1920, height: 1050)
+        let screen = HudScreen(frame: visible, visibleFrame: visible)
+        Self.testScreens = [screen]
+        Self.testMainScreen = screen
+
+        let window = HUDPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 592),
+            styleMask: [.borderless, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.delegate = self
+        boardWindow = window
+
+        let rightQuadrants = NSRect(x: 1296, y: 543, width: 623, height: 507)
+        let expectedList = NSRect(x: 1540, y: 750, width: 380, height: 300)
+        let expectedLeft = NSRect(x: 0, y: 750, width: 380, height: 300)
+        var ok = true
+
+        func reset(_ quadrants: NSRect) {
+            isSwitchingLayout = true
+            window.setFrame(quadrants, display: false)
+            isSwitchingLayout = false
+            currentLayout = .quadrants
+            listBaseHeight = 300
+            needsInitialHUDHeight = false
+            pendingSnapEdge = nil
+            appState.preferences.hudMode = .interactive
+            appState.preferences.hudInteractiveView = .quadrants
+            appState.preferences.hudFrame = HudWindowFrame(x: 1296, y: 750, width: 380, height: 300)
+            appState.preferences.hudQuadrantsFrame = HudWindowFrame(x: quadrants.origin.x, y: quadrants.origin.y, width: quadrants.width, height: quadrants.height)
+            updateHUD()   // 自然建立 lastHudMode，不手填
+        }
+        func expect(_ name: String, _ expected: NSRect) {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            let actual = window.frame
+            let pass = actual == expected
+            print("SELFTEST \(name) \(NSStringFromRect(actual)) expected \(NSStringFromRect(expected)) \(pass ? "PASS" : "FAIL")")
+            ok = ok && pass
+        }
+
+        // 右缘案例（用户实测四象限 frame）
+        reset(rightQuadrants)
+        expect("quadrants", rightQuadrants)
+        // A 手动单列：真实公开方法
+        appState.setHudInteractiveView(.list)
+        expect("manualList", expectedList)
+        // B 穿透收起：真实公开方法
+        reset(rightQuadrants)
+        appState.toggleHUDMode()
+        expect("passthroughList", expectedList)
+        // C 展开恢复：再次 toggle，lastHudMode 由 updateHUD 自然记录
+        appState.toggleHUDMode()
+        expect("expandRestore", rightQuadrants)
+        // 左缘案例
+        reset(NSRect(x: 1, y: 543, width: 623, height: 507))
+        appState.setHudInteractiveView(.list)
+        expect("manualListLeft", expectedLeft)
+
+        window.delegate = nil
+        boardWindow = nil
+        Self.testScreens = nil
+        Self.testMainScreen = nil
+        Self.isGeometrySelfTest = false
+        return ok
     }
+    #endif
 }
 
 private final class HUDPanel: NSPanel {

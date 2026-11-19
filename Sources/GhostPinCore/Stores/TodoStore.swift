@@ -227,6 +227,36 @@ public final class TodoStore: ObservableObject {
         )
     }
 
+    /// 四象限投影：与列表共用范围筛选和排序，但不应用条数上限与 Doing 聚焦。
+    /// 紧急程度按传入日历的次日零点判断，已逾期或今天到期均为紧急。
+    public func hudQuadrantProjection(
+        scope: HudScope,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> HudQuadrantProjection {
+        let scoped = scopedOpenItems(scope: scope, now: now, calendar: calendar)
+        let dayStart = calendar.ghostPinDayStart(for: now)
+        let nextDayStart = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? now
+        var buckets: [HudQuadrant: [TodoItem]] = [:]
+        for item in scoped {
+            let quadrant = HudQuadrant.classify(priority: item.priority, dueAt: item.dueAt, nextDayStart: nextDayStart)
+            buckets[quadrant, default: []].append(item)
+        }
+        let cells = HudQuadrant.allCases.map { quadrant in
+            let items = buckets[quadrant] ?? []
+            return HudQuadrantCell(
+                quadrant: quadrant,
+                doing: items.filter { $0.status == .doing },
+                todo: items.filter { $0.status == .todo }
+            )
+        }
+        return HudQuadrantProjection(
+            cells: cells,
+            doingCount: scoped.count(where: { $0.status == .doing }),
+            todoCount: scoped.count(where: { $0.status == .todo })
+        )
+    }
+
     /// 应用显示范围后的未完成任务，沿用 `openItems` 的既有排序。
     private func scopedOpenItems(scope: HudScope, now: Date, calendar: Calendar) -> [TodoItem] {
         let open = openItems(now: now)

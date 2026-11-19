@@ -8,6 +8,14 @@ struct GhostPinApp: App {
     @StateObject private var appState: AppState
 
     init() {
+        #if DEBUG
+        // 自测必须在创建 AppState 前具备有效隔离根，否则会构造真实偏好并覆盖真实窗口设置。
+        if ProcessInfo.processInfo.environment["GHOSTPIN_WINDOW_SELFTEST"] != nil,
+           !AppPreferences.isIsolatedVerification {
+            FileHandle.standardError.write(Data("GHOSTPIN_WINDOW_SELFTEST 需要 GHOSTPIN_TEST_SUPPORT_ROOT 隔离根\n".utf8))
+            exit(2)
+        }
+        #endif
         let state = AppState()
         _appState = StateObject(wrappedValue: state)
         AppDelegate.appState = state
@@ -54,6 +62,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["GHOSTPIN_WINDOW_SELFTEST"] != nil {
+            let ok = Self.appState?.windowCoordinator.runGeometrySelfTest() ?? false
+            exit(ok ? 0 : 1)
+        }
+        #endif
         Self.appState?.start()
     }
 

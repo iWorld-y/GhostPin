@@ -1,4 +1,5 @@
 import Combine
+import CoreGraphics
 import Foundation
 import GhostPinCore
 
@@ -86,6 +87,36 @@ let checks: [Check] = [
     ("TodoStore.hudProjection shows both sections when focus is disabled", checkHudProjectionDisabledShowsBothSections),
     ("TodoStore.hudProjection applies maxCount to rendered items only", checkHudProjectionLimitAppliesToRenderedItems),
     ("TodoStore.hudProjection counts sections independently of the limit", checkHudProjectionCountsAreIndependent),
+    ("TodoStore.hudQuadrantProjection classifies four combinations", checkHudQuadrantClassifiesFourCombinations),
+    ("TodoStore.hudQuadrantProjection urgency uses next-day boundary", checkHudQuadrantUrgencyBoundaries),
+    ("TodoStore.hudQuadrantProjection ignores list limit and focus", checkHudQuadrantTodayScopeIgnoresListRules),
+    ("TodoStore.hudQuadrantProjection keeps Doing before Todo and list order", checkHudQuadrantDoingBeforeTodoKeepsListOrder),
+    ("TodoStore.hudQuadrantProjection removes completed and updates counts", checkHudQuadrantCompletionRemovesAndCountsUpdate),
+    ("TodoStore.hudQuadrantProjection reclassifies across midnight", checkHudQuadrantDayRollover),
+    ("TodoStore.hudQuadrantProjection follows priority and due updates", checkHudQuadrantUpdateMovesCell),
+    ("TodoStore.hudQuadrantProjection keeps four empty cells when empty", checkHudQuadrantEmptyProjection),
+    ("HudFrameGeometry.restoredFrame clamps partial overflow", checkHudFrameRestoredClampsPartialOverflow),
+    ("HudFrameGeometry.restoredFrame falls back to main when offscreen", checkHudFrameRestoredFallsBackToMain),
+    ("HudFrameGeometry.restoredFrame picks the best-intersecting screen", checkHudFrameRestoredPicksBestScreen),
+    ("HudFrameGeometry.switchedFrame keeps top-left on the current screen", checkHudFrameSwitchKeepsTopLeft),
+    ("HudFrameGeometry.switchedFrame shrinks oversized target into view", checkHudFrameSwitchShrinksOversizedTarget),
+    ("HudFrameGeometry.listModeFrame round-trips 144-184-144", checkHudListModeHeightRoundTrip),
+    ("HudFrameGeometry.listModeFrame respects user-resized height", checkHudListModeRespectsUserResize),
+    ("HudFrameGeometry.listModeFrame clamps growth at screen bottom", checkHudListModeBottomEdgeClamp),
+    ("HudFrameGeometry.listHeight raises saved compact size for interactive", checkHudListModeSavedOldSizeRestore),
+    ("HudFrameGeometry list base height survives quadrants round-trip and restart", checkHudListBaseHeightPersistenceChain),
+    ("HudFrameGeometry collapse snaps horizontally to nearer left/right side", checkHudCollapseSideHorizontalOnly),
+    ("HudFrameGeometry snap tie-break is deterministic preferring left/right", checkHudSnapTieDeterministic),
+    ("HudFrameGeometry collapse handles multi-screen negative coordinates", checkHudSnapMultiScreenNegativeCoords),
+    ("HudFrameGeometry restoring quadrants recovers pre-collapse frame", checkHudSnapRestoreQuadrantsFrame),
+    ("HudFrameGeometry expand/general switch does not snap to edge", checkHudExpandSwitchDoesNotSnap),
+    ("HudFrameGeometry collapse content-fit re-aligns right side and persists", checkHudCollapseContentFitRealignsRightSide),
+    ("HudFrameGeometry collapse content-fit keeps left edge aligned", checkHudCollapseContentFitLeftEdge),
+    ("HudFrameGeometry manual interactive collapse snaps and keeps compact base", checkHudManualCollapseSnapsKeepsCompactBase),
+    ("HudFrameGeometry manual collapse no-history content-fit keeps measured height", checkHudManualCollapseNoHistoryContentFit),
+    ("HudFrameGeometry manual vs passthrough collapse differ only by mode height", checkHudManualVsPassthroughCollapseHeight),
+    ("HudFrameGeometry legacy 300 preference and user drag round-trip keep 300", checkHudLegacyPreference300AndUserDragRoundTrip),
+    ("HudFrameGeometry real-world collapse frame snaps right instead of stagnating", checkHudCollapseRealFrameReproduction),
     ("TodoStore sorts open items by priority then due date", checkSortsOpenItemsByPriorityThenDueDate),
     ("TodoStore sinks overdue items to bottom", checkSortsOverdueItemsToBottom),
     ("TodoStore sorts items without due date after those with", checkSortsItemsWithoutDueDateLast),
@@ -1394,4 +1425,600 @@ func makeDate(year: Int, month: Int, day: Int, hour: Int, minute: Int) -> Date {
         minute: minute
     )
     return checkCalendar.date(from: components)!
+}
+
+func checkHudQuadrantClassifiesFourCombinations() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let first = try require(try store.add(title: "高-今天", group: "默认", priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0)), "应创建")
+    let second = try require(try store.add(title: "高-无截止", group: "默认", priority: .high), "应创建")
+    let third = try require(try store.add(title: "中-已逾期", group: "默认", priority: .medium, dueAt: makeDate(year: 2026, month: 6, day: 14, hour: 10, minute: 0)), "应创建")
+    let fourth = try require(try store.add(title: "低-明天", group: "默认", priority: .low, dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 9, minute: 0)), "应创建")
+
+    let projection = store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar)
+    try check(projection.cell(.importantUrgent).todo.map(\.id) == [first.id], "高优先级今天到期应在优先处理")
+    try check(projection.cell(.importantNotUrgent).todo.map(\.id) == [second.id], "高优先级无截止应在安排时间")
+    try check(projection.cell(.generalUrgent).todo.map(\.id) == [third.id], "中优先级已逾期应在及时处理")
+    try check(projection.cell(.generalNotUrgent).todo.map(\.id) == [fourth.id], "低优先级明天到期应在稍后处理")
+    let allIDs = projection.cells.flatMap { $0.doing + $0.todo }.map(\.id)
+    try check(allIDs.count == 4 && Set(allIDs).count == 4, "每条任务应恰好出现一次")
+    try check(projection.doingCount + projection.todoCount == store.openItems(now: now).count, "四象限总数应等于范围内未完成数")
+}
+
+func checkHudQuadrantUrgencyBoundaries() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let overdue = try require(try store.add(title: "已逾期", group: "默认", dueAt: makeDate(year: 2026, month: 6, day: 14, hour: 23, minute: 59)), "应创建")
+    let todayEnd = try require(try store.add(title: "今天末尾", group: "默认", dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 23, minute: 59)), "应创建")
+    let nextMidnight = try require(try store.add(title: "次日零点", group: "默认", dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 0, minute: 0)), "应创建")
+    let noDue = try require(try store.add(title: "无截止", group: "默认"), "应创建")
+
+    let projection = store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar)
+    let urgentIDs = Set((projection.cell(.generalUrgent).todo + projection.cell(.importantUrgent).todo).map(\.id))
+    let notUrgentIDs = Set((projection.cell(.generalNotUrgent).todo + projection.cell(.importantNotUrgent).todo).map(\.id))
+    try check(urgentIDs == Set([overdue.id, todayEnd.id]), "已逾期与今天末尾应为紧急，实际: \(urgentIDs)")
+    try check(notUrgentIDs == Set([nextMidnight.id, noDue.id]), "次日零点与无截止应为不紧急，实际: \(notUrgentIDs)")
+}
+
+func checkHudQuadrantTodayScopeIgnoresListRules() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    var todayIDs: [Int64] = []
+    for index in 0..<6 {
+        let item = try require(
+            try store.add(title: "今天\(index)", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 1, minute: index), priority: .high),
+            "应创建"
+        )
+        todayIDs.append(item.id)
+        if index < 2 {
+            _ = try store.setStatus(item.id, status: .doing, at: now)
+        }
+    }
+    _ = try require(
+        try store.add(title: "昨天任务", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 14, hour: 23, minute: 59), priority: .high),
+        "应创建"
+    )
+
+    // 列表上限 3 且聚焦开启；四象限必须仍展示今天全部 6 条。
+    let projection = store.hudQuadrantProjection(scope: .today, now: now, calendar: checkCalendar)
+    let cell = projection.cell(.importantNotUrgent)
+    try check(cell.count == 6, "同格应容纳全部 6 条，实际: \(cell.count)")
+    try check(cell.doing.count == 2 && cell.todo.count == 4, "格内应按状态分区")
+    try check(Set((cell.doing + cell.todo).map(\.id)) == Set(todayIDs), "昨天创建的任务不计入任何象限")
+    for quadrant in [HudQuadrant.importantUrgent, .generalUrgent, .generalNotUrgent] {
+        try check(projection.cell(quadrant).count == 0, "其他三格应为空")
+    }
+    try check(projection.doingCount == 2 && projection.todoCount == 4, "头部计数应为范围内完整计数")
+
+    let list = store.hudProjection(scope: .today, maxCount: 3, focusDoing: true, now: now, calendar: checkCalendar)
+    try check(list.doing.count == 2 && list.todo.isEmpty, "列表仍应聚焦 Doing 并受上限约束")
+}
+
+func checkHudQuadrantDoingBeforeTodoKeepsListOrder() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let doingLow = try require(
+        try store.add(title: "Doing-低", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 9, minute: 0), priority: .low),
+        "应创建"
+    )
+    _ = try store.setStatus(doingLow.id, status: .doing, at: now)
+    let todoMedium = try require(
+        try store.add(title: "Todo-中", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 10, minute: 30), priority: .medium),
+        "应创建"
+    )
+    let todoHighOld = try require(
+        try store.add(title: "Todo-高-早", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 10, minute: 0), priority: .high),
+        "应创建"
+    )
+    let todoHighNew = try require(
+        try store.add(title: "Todo-高-晚", group: "默认", createdAt: makeDate(year: 2026, month: 6, day: 15, hour: 11, minute: 0), priority: .high),
+        "应创建"
+    )
+
+    let projection = store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar)
+    let cell = projection.cell(.generalNotUrgent)
+    try check(cell.doing.map(\.id) == [doingLow.id], "同格低优先级 Doing 应在 Doing 分区")
+    try check(cell.todo.map(\.id) == [todoMedium.id], "同格中优先级 Todo 应在 Todo 分区")
+    try check((cell.doing + cell.todo).map(\.id) == [doingLow.id, todoMedium.id], "同格 Doing 应排在 Todo 前面")
+    let todoCell = projection.cell(.importantNotUrgent)
+    try check(todoCell.todo.map(\.id) == [todoHighNew.id, todoHighOld.id], "同状态应沿用列表排序（新任务在前）")
+    let list = store.hudProjection(scope: .all, maxCount: 10, focusDoing: false, now: now, calendar: checkCalendar)
+    try check(list.doing.map(\.id) == cell.doing.map(\.id), "Doing 分区应与列表一致")
+    try check(list.todo.map(\.id) == [todoHighNew.id, todoHighOld.id, todoMedium.id], "列表 Todo 排序应保持既有规则")
+}
+
+func checkHudQuadrantCompletionRemovesAndCountsUpdate() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let item = try require(try store.add(title: "推进任务", group: "默认", priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0)), "应创建")
+    let other = try require(try store.add(title: "保留任务", group: "默认", priority: .high, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 19, minute: 0)), "应创建")
+
+    _ = try store.advanceStatus(item.id, at: now)
+    let afterStart = store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar)
+    let startedCell = afterStart.cell(.importantUrgent)
+    try check(startedCell.doing.map(\.id) == [item.id] && startedCell.todo.map(\.id) == [other.id], "第一次推进只改变格内分区")
+    try check(startedCell.count == 2 && afterStart.doingCount == 1 && afterStart.todoCount == 1, "格内计数与头部计数应同步")
+
+    _ = try store.advanceStatus(item.id, at: now)
+    let afterDone = store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar)
+    let doneCell = afterDone.cell(.importantUrgent)
+    try check(doneCell.doing.isEmpty && doneCell.todo.map(\.id) == [other.id], "完成后应从该格移除")
+    try check(doneCell.count == 1 && afterDone.doingCount == 0 && afterDone.todoCount == 1, "完成后计数应同步更新")
+}
+
+func checkHudQuadrantDayRollover() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let beforeMidnight = makeDate(year: 2026, month: 6, day: 15, hour: 23, minute: 59)
+    let afterMidnight = makeDate(year: 2026, month: 6, day: 16, hour: 0, minute: 0)
+
+    let item = try require(
+        try store.add(title: "次日零点到期", group: "默认", createdAt: beforeMidnight, priority: .high, dueAt: afterMidnight),
+        "应创建"
+    )
+
+    let before = store.hudQuadrantProjection(scope: .all, now: beforeMidnight, calendar: checkCalendar)
+    try check(before.cell(.importantNotUrgent).todo.map(\.id) == [item.id], "跨日前应为不紧急")
+    let after = store.hudQuadrantProjection(scope: .all, now: afterMidnight, calendar: checkCalendar)
+    try check(after.cell(.importantUrgent).todo.map(\.id) == [item.id], "进入到期日后应为紧急")
+
+    let todayBefore = store.hudQuadrantProjection(scope: .today, now: beforeMidnight, calendar: checkCalendar)
+    try check(todayBefore.todoCount == 1, "跨日前应属于今天新增")
+    let todayAfter = store.hudQuadrantProjection(scope: .today, now: afterMidnight, calendar: checkCalendar)
+    try check(todayAfter.todoCount == 0, "跨日后不再属于今天新增")
+}
+
+func checkHudQuadrantUpdateMovesCell() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let item = try require(try store.add(title: "可变任务", group: "默认", priority: .high), "应创建")
+    try check(store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar).cell(.importantNotUrgent).todo.map(\.id) == [item.id], "初始应在安排时间")
+
+    // CLI 的优先级与截止时间修改走同一 store.update 路径。
+    _ = try store.update(item.id, priority: .low, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 20, minute: 0))
+    try check(store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar).cell(.generalUrgent).todo.map(\.id) == [item.id], "降优先级并设今天截止后应在及时处理")
+
+    _ = try store.update(item.id, clearDue: true)
+    try check(store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar).cell(.generalNotUrgent).todo.map(\.id) == [item.id], "清除截止后应在稍后处理")
+}
+
+func checkHudQuadrantEmptyProjection() throws {
+    let temporaryDirectory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let store = makeStore(in: temporaryDirectory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let projection = store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar)
+    try check(projection.cells.count == 4, "空状态应保留四个象限")
+    try check(projection.cells.allSatisfy { $0.count == 0 }, "空格计数应为零")
+    try check(projection.doingCount == 0 && projection.todoCount == 0, "空状态头部计数应为零")
+    try check(projection.cells.map(\.quadrant) == HudQuadrant.allCases, "象限顺序应固定")
+}
+
+private func hudScreen(_ frame: CGRect, visible: CGRect) -> HudScreen {
+    HudScreen(frame: frame, visibleFrame: visible)
+}
+
+private func rectContains(_ outer: CGRect, _ inner: CGRect) -> Bool {
+    inner.minX >= outer.minX && inner.minY >= outer.minY && inner.maxX <= outer.maxX && inner.maxY <= outer.maxY
+}
+
+func checkHudFrameRestoredClampsPartialOverflow() throws {
+    let screen = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    // 保存帧右侧与底部部分越界；仅相交会留下屏外部分，必须完整夹取。
+    let saved = CGRect(x: 1800, y: -100, width: 380, height: 460)
+    let restored = HudFrameGeometry.restoredFrame(saved, screens: [screen], main: screen)
+    try check(rectContains(screen.visibleFrame, restored), "部分越界应完整夹取进可用区，实际: \(restored)")
+    try check(restored.width == 380 && restored.height == 460, "尺寸可容纳时应保留")
+    try check(restored.maxX == screen.visibleFrame.maxX, "右侧应贴齐可用区边缘")
+    try check(restored.minY == screen.visibleFrame.minY, "底部应贴齐可用区边缘")
+}
+
+func checkHudFrameRestoredFallsBackToMain() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let b = hudScreen(CGRect(x: 1920, y: 0, width: 2560, height: 1440), visible: CGRect(x: 1920, y: 25, width: 2560, height: 1415))
+    let saved = CGRect(x: 9000, y: 9000, width: 380, height: 460)
+    let restored = HudFrameGeometry.restoredFrame(saved, screens: [a, b], main: a)
+    try check(rectContains(a.visibleFrame, restored), "完全屏外应回退主屏并夹取，实际: \(restored)")
+}
+
+func checkHudFrameRestoredPicksBestScreen() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let b = hudScreen(CGRect(x: 1920, y: 0, width: 2560, height: 1440), visible: CGRect(x: 1920, y: 25, width: 2560, height: 1415))
+    let saved = CGRect(x: 2000, y: 1300, width: 720, height: 592)
+    let restored = HudFrameGeometry.restoredFrame(saved, screens: [a, b], main: a)
+    try check(rectContains(b.visibleFrame, restored), "应选相交面积最大的屏幕 B 并夹取，实际: \(restored)")
+    try check(restored.maxY == b.visibleFrame.maxY, "顶部越界应贴齐 B 可用区上缘")
+}
+
+func checkHudFrameSwitchKeepsTopLeft() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let b = hudScreen(CGRect(x: 1920, y: 0, width: 2560, height: 1440), visible: CGRect(x: 1920, y: 25, width: 2560, height: 1415))
+    let target = CGSize(width: 720, height: 592)
+
+    // 当前窗口在 A，目标尺寸足够容纳：左上角应原样保留，不受 B 上旧保存位置影响。
+    let current = CGRect(x: 100, y: 700, width: 380, height: 144)
+    let switched = HudFrameGeometry.switchedFrame(current: current, targetSize: target, screens: [a, b], main: a)
+    try check(switched.origin == CGPoint(x: 100, y: 844 - 592), "应保留当前左上角，实际: \(switched.origin)")
+    try check(switched.size == target, "仅取目标尺寸")
+    try check(rectContains(a.visibleFrame, switched), "应留在当前屏 A，实际: \(switched)")
+
+    // 当前窗口靠近 A 底部，展开后顶部越界：夹取进 A，仍不跳到 B。
+    let low = CGRect(x: 100, y: 200, width: 380, height: 144)
+    let clamped = HudFrameGeometry.switchedFrame(current: low, targetSize: target, screens: [a, b], main: a)
+    try check(rectContains(a.visibleFrame, clamped), "越界应夹取进当前屏 A，实际: \(clamped)")
+    try check(clamped.minX == 100 && clamped.minY == a.visibleFrame.minY, "水平保留左上角、垂直贴齐下缘")
+}
+
+func checkHudFrameSwitchShrinksOversizedTarget() throws {
+    let small = hudScreen(CGRect(x: 0, y: 0, width: 800, height: 625), visible: CGRect(x: 0, y: 25, width: 800, height: 600))
+    let current = CGRect(x: 10, y: 100, width: 380, height: 144)
+    let switched = HudFrameGeometry.switchedFrame(current: current, targetSize: CGSize(width: 900, height: 700), screens: [small], main: small)
+    try check(rectContains(small.visibleFrame, switched), "超尺寸目标应缩小并夹取，实际: \(switched)")
+    try check(switched.width == 800 && switched.height == 600, "尺寸应缩到可用区上限")
+}
+
+func checkHudListModeHeightRoundTrip() throws {
+    let screen = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let base: CGFloat = 144
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 184, "交互应抬到 184")
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 144, "穿透应沿用 144")
+
+    let passthrough = CGRect(x: 100, y: 400, width: 380, height: 144)
+    let interactive = HudFrameGeometry.listModeFrame(current: passthrough, baseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    try check(interactive.height == 184 && interactive.origin == CGPoint(x: 100, y: 360), "144→184 应保留左上角，实际: \(interactive)")
+    let restored = HudFrameGeometry.listModeFrame(current: interactive, baseHeight: base, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    try check(restored == passthrough, "184→144 应还原原 frame，实际: \(restored)")
+}
+
+func checkHudListModeRespectsUserResize() throws {
+    let screen = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let userHeight: CGFloat = 300
+    let current = CGRect(x: 100, y: 400, width: 380, height: userHeight)
+    try check(HudFrameGeometry.listHeight(baseHeight: userHeight, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "交互应保留用户 300")
+    try check(HudFrameGeometry.listHeight(baseHeight: userHeight, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "穿透应保留用户 300")
+    let interactive = HudFrameGeometry.listModeFrame(current: current, baseHeight: userHeight, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    let passthrough = HudFrameGeometry.listModeFrame(current: current, baseHeight: userHeight, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    try check(interactive == current && passthrough == current, "已足够高的用户尺寸两种模式都应保持")
+}
+
+func checkHudListModeBottomEdgeClamp() throws {
+    let screen = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    // 贴底：窗口底边就在可用区下缘，增高后左上角锚定会使底边越界，必须夹取。
+    let atBottom = CGRect(x: 100, y: 25, width: 380, height: 144)
+    let grown = HudFrameGeometry.listModeFrame(current: atBottom, baseHeight: 144, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    try check(rectContains(screen.visibleFrame, grown), "贴底增高应夹取进可用区，实际: \(grown)")
+    try check(grown.height == 184 && grown.minY == 25 && grown.minX == 100, "应增高到 184 并贴齐下缘")
+
+    // 有足够空间：保留左上角，不移动。
+    let withRoom = CGRect(x: 100, y: 400, width: 380, height: 144)
+    let free = HudFrameGeometry.listModeFrame(current: withRoom, baseHeight: 144, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    try check(free.origin == CGPoint(x: 100, y: 360) && free.maxY == withRoom.maxY, "空间充足应保留左上角")
+}
+
+func checkHudListModeSavedOldSizeRestore() throws {
+    // 启动恢复/四象限→交互列表：旧的 144 列表尺寸应先按交互最小值抬到 184 再夹取。
+    try check(HudFrameGeometry.listHeight(baseHeight: 144, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 184, "旧 144 交互应算为 184")
+    try check(HudFrameGeometry.listHeight(baseHeight: 300, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "旧 300 交互不应被压低")
+    try check(HudFrameGeometry.listHeight(baseHeight: 144, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 144, "旧 144 穿透应保持 144")
+
+    // 反向切换：临时增高到 184 后，以持久化基准 144 还原。
+    let screen = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let transient = CGRect(x: 100, y: 360, width: 380, height: 184)
+    let restored = HudFrameGeometry.listModeFrame(current: transient, baseHeight: 144, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144, screens: [screen], main: screen)
+    try check(restored.height == 144 && restored.origin == CGPoint(x: 100, y: 400), "应还原保存的旧 144 尺寸，实际: \(restored)")
+}
+
+func checkHudListBaseHeightPersistenceChain() throws {
+    // 串联协调器实际调用的保存/恢复决策：列表显示高度=listHeight，离开/进入布局与移动/调宽
+    // 的持久化=persistedListFrame（高度取基准），用户调高=updatedListBaseHeight，重启从持久化高度加载基准。
+    func display(_ base: CGFloat, _ interactive: Bool) -> CGFloat {
+        HudFrameGeometry.listHeight(baseHeight: base, interactive: interactive, interactiveMinimum: 184, passthroughMinimum: 144)
+    }
+    func saveList(actualHeight: CGFloat, base: CGFloat) -> CGFloat {
+        HudFrameGeometry.persistedListFrame(actual: CGRect(x: 100, y: 400, width: 380, height: actualHeight), baseHeight: base).height
+    }
+    func userResize(actualHeight: CGFloat, base: CGFloat, interactive: Bool) -> CGFloat {
+        HudFrameGeometry.updatedListBaseHeight(actualHeight: actualHeight, currentBaseHeight: base, interactive: interactive, interactiveMinimum: 184, passthroughMinimum: 144)
+    }
+
+    // A：保存 144 → 交互列表 184 → 四象限 → 穿透 → 重启，基准始终 144。
+    var persisted: CGFloat = 144
+    var base = persisted                       // 重启/启动加载基准
+    var height = display(base, true)           // 进入交互列表（临时增高，不写回）
+    try check(height == 184, "交互列表显示应为 184")
+    try check(persisted == 144, "临时增高不得写回")
+    persisted = saveList(actualHeight: height, base: base)   // 点四象限：离开列表前保存
+    try check(persisted == 144, "跨四象限离开列表不应把 184 写回基准")
+    height = display(persisted, false)         // 切回穿透：进入列表恢复
+    persisted = saveList(actualHeight: height, base: base)
+    try check(height == 144 && persisted == 144, "穿透应还原并持久化 144")
+    base = persisted                           // 重启
+    try check(base == 144, "重启后基准仍为 144")
+
+    // B：用户真实调高到 300 后，跨四象限与重启持续 300。
+    base = 144; persisted = 144
+    height = display(base, true)               // 交互 184
+    base = userResize(actualHeight: 300, base: base, interactive: true)
+    persisted = saveList(actualHeight: 300, base: base)
+    try check(base == 300 && persisted == 300, "用户调高 300 应更新基准并持久化")
+    persisted = saveList(actualHeight: 300, base: base)      // 跨四象限
+    try check(persisted == 300, "跨四象限应保留用户 300")
+    height = display(persisted, false)         // 穿透
+    persisted = saveList(actualHeight: height, base: base)
+    try check(height == 300 && persisted == 300, "穿透应保留用户 300")
+    base = persisted
+    try check(base == 300, "重启后基准仍为 300")
+
+    // C：仅调宽与仅移动不得污染基准（交互显示 184，基准 144）。
+    base = 144; persisted = 144
+    height = display(base, true)
+    base = userResize(actualHeight: height, base: base, interactive: true)   // 仅调宽，高度仍 184
+    persisted = saveList(actualHeight: height, base: base)
+    try check(base == 144 && persisted == 144, "仅调宽应保留基准 144")
+    persisted = saveList(actualHeight: height, base: base)                   // 仅移动
+    try check(persisted == 144, "仅移动应保留基准 144")
+}
+
+func checkHudCollapseSideHorizontalOnly() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let listSize = CGSize(width: 380, height: 144)
+
+    let nearLeft = CGRect(x: 10, y: 300, width: 720, height: 592)
+    try check(HudFrameGeometry.collapseSide(frame: nearLeft, visible: a.visibleFrame) == .left, "靠近左边应选左")
+    let left = HudFrameGeometry.collapsedListFrame(current: nearLeft, targetSize: listSize, screens: [a], main: a)
+    try check(left.minX == 0 && left.size == listSize && rectContains(a.visibleFrame, left), "应贴左边缘并保持尺寸，实际: \(left)")
+
+    let nearRight = CGRect(x: 1190, y: 300, width: 720, height: 592)
+    try check(HudFrameGeometry.collapseSide(frame: nearRight, visible: a.visibleFrame) == .right, "靠近右边应选右")
+    let right = HudFrameGeometry.collapsedListFrame(current: nearRight, targetSize: listSize, screens: [a], main: a)
+    try check(right.maxX == 1920 && rectContains(a.visibleFrame, right), "应贴右边缘，实际: \(right)")
+
+    // 关键回归：近底但右更近——顶/底再近也不得使水平位置滞留，应贴右。
+    let bottomButRight = CGRect(x: 1190, y: 30, width: 720, height: 592)
+    try check(HudFrameGeometry.collapseSide(frame: bottomButRight, visible: a.visibleFrame) == .right, "底边再近也应选较近的右")
+    let br = HudFrameGeometry.collapsedListFrame(current: bottomButRight, targetSize: listSize, screens: [a], main: a)
+    try check(br.maxX == 1920 && br.minY != 25, "应水平贴右而非滞留/贴底，实际: \(br)")
+
+    // 近顶但左更近：应贴左。
+    let topButLeft = CGRect(x: 10, y: 480, width: 720, height: 592)
+    try check(HudFrameGeometry.collapseSide(frame: topButLeft, visible: a.visibleFrame) == .left, "顶边再近也应选较近的左")
+    let tl = HudFrameGeometry.collapsedListFrame(current: topButLeft, targetSize: listSize, screens: [a], main: a)
+    try check(tl.minX == 0, "应水平贴左，实际: \(tl)")
+
+    let touching = CGRect(x: 0, y: 300, width: 720, height: 592)
+    try check(HudFrameGeometry.collapseSide(frame: touching, visible: a.visibleFrame) == .left, "碰左缘应选左")
+}
+
+func checkHudSnapTieDeterministic() throws {
+    let wide = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    // 左右间距相等 → 优先左。
+    let lrTie = CGRect(x: 600, y: 500, width: 720, height: 100)
+    try check(HudFrameGeometry.collapseSide(frame: lrTie, visible: wide.visibleFrame) == .left, "左右平局应选左")
+
+    let square = hudScreen(CGRect(x: 0, y: 0, width: 1000, height: 1000), visible: CGRect(x: 0, y: 0, width: 1000, height: 1000))
+    // 水平居中（左右相等）且垂直更近底：仍只选水平边，平局取左。
+    let centered = CGRect(x: 400, y: 100, width: 200, height: 200)
+    try check(HudFrameGeometry.collapseSide(frame: centered, visible: square.visibleFrame) == .left, "水平平局应确定选左，不受垂直近边影响")
+}
+
+func checkHudSnapMultiScreenNegativeCoords() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let b = hudScreen(CGRect(x: -1920, y: 0, width: 1920, height: 1080), visible: CGRect(x: -1920, y: 25, width: 1920, height: 1055))
+    let listSize = CGSize(width: 380, height: 144)
+
+    // 负坐标屏 B 上靠近其左边：应选 B 并贴 B 的左缘（负坐标）。
+    let onB = CGRect(x: -1910, y: 300, width: 720, height: 592)
+    let collapsedB = HudFrameGeometry.collapsedListFrame(current: onB, targetSize: listSize, screens: [a, b], main: a)
+    try check(HudFrameGeometry.collapseSide(frame: onB, visible: b.visibleFrame) == .left, "B 屏靠近左边应选左")
+    try check(collapsedB.minX == -1920 && rectContains(b.visibleFrame, collapsedB), "应贴 B 屏负坐标左缘，实际: \(collapsedB)")
+    try check(collapsedB.maxX < 0 && collapsedB.size == listSize, "应留在 B 屏并保持尺寸")
+
+    // A 屏靠近右缘（与 B 相邻）：应贴 A 的右缘，不跨到 B。
+    let onA = CGRect(x: 1190, y: 300, width: 720, height: 592)
+    let collapsedA = HudFrameGeometry.collapsedListFrame(current: onA, targetSize: listSize, screens: [a, b], main: a)
+    try check(collapsedA.maxX == 1920 && collapsedA.minX >= 0 && rectContains(a.visibleFrame, collapsedA), "应贴 A 屏右缘不跨屏，实际: \(collapsedA)")
+}
+
+func checkHudSnapRestoreQuadrantsFrame() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let b = hudScreen(CGRect(x: -1920, y: 0, width: 1920, height: 1080), visible: CGRect(x: -1920, y: 25, width: 1920, height: 1055))
+
+    // 收起前四象限 frame 在屏内：恢复应原样还原。
+    let q = CGRect(x: 600, y: 300, width: 720, height: 592)
+    try check(HudFrameGeometry.restoredFrame(q, screens: [a, b], main: a) == q, "在屏内应原样还原四象限 frame")
+
+    // 显示器变化（原屏消失）：回退主屏并夹取。
+    let qOnB = CGRect(x: -1500, y: 300, width: 720, height: 592)
+    let fallback = HudFrameGeometry.restoredFrame(qOnB, screens: [a], main: a)
+    try check(rectContains(a.visibleFrame, fallback), "原屏消失应回退主屏夹取，实际: \(fallback)")
+
+    // 部分越界：夹取回当前屏。
+    let qOverflow = CGRect(x: 1800, y: 300, width: 720, height: 592)
+    let clamped = HudFrameGeometry.restoredFrame(qOverflow, screens: [a], main: a)
+    try check(rectContains(a.visibleFrame, clamped) && clamped.maxX == 1920, "部分越界应夹取，实际: \(clamped)")
+}
+
+func checkHudExpandSwitchDoesNotSnap() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let current = CGRect(x: 600, y: 300, width: 720, height: 592)
+    let listSize = CGSize(width: 380, height: 144)
+
+    // 展开四象限/一般切换用 switchedFrame：保留左上角，不吸边。
+    let manual = HudFrameGeometry.switchedFrame(current: current, targetSize: listSize, screens: [a], main: a)
+    try check(manual.minX == 600 && manual.maxY == 892, "展开/一般切换应保留左上角不吸边，实际: \(manual)")
+
+    // 同一窗口四象限收为列表则水平吸边（此处左右平局取左），形成对照。
+    let collapsed = HudFrameGeometry.collapsedListFrame(current: current, targetSize: listSize, screens: [a], main: a)
+    try check(collapsed.minX == 0 && manual.minX == 600, "收起应水平吸边而展开不应，实际: \(collapsed)")
+}
+
+func checkHudCollapseContentFitRealignsRightSide() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    // 无历史列表尺寸：四象限近右收起用默认 460 高贴右。
+    let quadrants = CGRect(x: 1190, y: 30, width: 720, height: 592)
+    try check(HudFrameGeometry.collapseSide(frame: quadrants, visible: a.visibleFrame) == .right, "近右应选右")
+    let collapsed = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: 460), screens: [a], main: a)
+    try check(collapsed.maxX == 1920 && collapsed.height == 460, "收起应以 460 高贴右，实际: \(collapsed)")
+
+    // 内容适配实测 144：最终尺寸确定后仍贴右，垂直位置保留。
+    let fitted = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 144, snapEdge: .right, screens: [a], main: a)
+    try check(fitted.height == 144 && fitted.maxX == 1920 && fitted.maxY == collapsed.maxY, "内容适配后应仍贴右且保留垂直位置，实际: \(fitted)")
+
+    // 持久化与重启：最终 frame 高度 144、右缘位置保留。
+    let persisted = HudFrameGeometry.persistedListFrame(actual: fitted, baseHeight: 144)
+    try check(persisted.height == 144 && persisted.maxX == 1920, "应持久化最终贴右 frame")
+    let restarted = HudFrameGeometry.restoredFrame(persisted, screens: [a], main: a)
+    try check(restarted.maxX == 1920 && restarted.height == 144, "重启应恢复贴右位置，实际: \(restarted)")
+}
+
+func checkHudCollapseContentFitLeftEdge() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let quadrants = CGRect(x: 10, y: 300, width: 720, height: 592)
+    try check(HudFrameGeometry.collapseSide(frame: quadrants, visible: a.visibleFrame) == .left, "近左应选左边")
+    let collapsed = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: 460), screens: [a], main: a)
+    try check(collapsed.minX == 0, "收起应贴左")
+    let fitted = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 144, snapEdge: .left, screens: [a], main: a)
+    try check(fitted.height == 144 && fitted.minX == 0 && rectContains(a.visibleFrame, fitted), "内容适配后应仍贴左并夹取，实际: \(fitted)")
+}
+
+func checkHudManualCollapseSnapsKeepsCompactBase() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let quadrants = CGRect(x: 1190, y: 30, width: 720, height: 592)
+    try check(HudFrameGeometry.collapseSide(frame: quadrants, visible: a.visibleFrame) == .right, "近右应选右")
+
+    // 交互手动「单列」收起：显示高含工具栏 184，仍水平贴最近边。
+    let interactiveHeight = HudFrameGeometry.listHeight(baseHeight: 144, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
+    try check(interactiveHeight == 184, "交互列表显示应含工具栏 184")
+    let collapsed = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: interactiveHeight), screens: [a], main: a)
+    try check(collapsed.maxX == 1920 && collapsed.height == 184, "手动收起应贴右且工具栏可见，实际: \(collapsed)")
+
+    // 工具栏临时增高不得污染紧凑基准：持久化高度仍 144。
+    let persisted = HudFrameGeometry.persistedListFrame(actual: collapsed, baseHeight: 144)
+    try check(persisted.height == 144, "交互临时增高不应写回紧凑基准")
+    // 仅调宽（高度仍 184）不更新基准。
+    let base = HudFrameGeometry.updatedListBaseHeight(actualHeight: 184, currentBaseHeight: 144, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
+    try check(base == 144, "仅调宽应保留紧凑基准 144")
+    try check(HudFrameGeometry.listHeight(baseHeight: 144, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 144, "随后穿透应还原紧凑 144")
+}
+
+func checkHudManualCollapseNoHistoryContentFit() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let quadrants = CGRect(x: 1190, y: 30, width: 720, height: 592)
+    // 无历史列表尺寸：默认 460 贴右（交互最小值不高于 460）。
+    let provisionalHeight = HudFrameGeometry.listHeight(baseHeight: 460, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
+    try check(provisionalHeight == 460, "默认 460 交互显示应为 460")
+    let collapsed = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: provisionalHeight), screens: [a], main: a)
+    try check(collapsed.maxX == 1920 && collapsed.height == 460, "无历史收起应先贴右")
+
+    // 首次内容适配实测交互空列表 184：调用实际基准选择逻辑，偏好基准应为穿透最小值 144，
+    // 窗口仍显示 184 并沿右侧重对齐。
+    let fitted = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 184, snapEdge: .right, screens: [a], main: a)
+    try check(fitted.height == 184 && fitted.maxX == 1920, "交互显示应 184 且贴右，实际: \(fitted)")
+    let base = HudFrameGeometry.firstFitBaseHeight(measuredHeight: 184, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
+    try check(base == 144, "无历史交互空列表首次测量偏好基准应为 144")
+    let persisted = HudFrameGeometry.persistedListFrame(actual: fitted, baseHeight: base)
+    try check(persisted.height == 144 && persisted.maxX == 1920, "应持久化基准 144 与贴右位置")
+    // 同模式刷新与重启仍显示 184。
+    let refreshed = HudFrameGeometry.listModeFrame(current: fitted, baseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144, screens: [a], main: a)
+    try check(refreshed.height == 184, "同模式刷新应保持显示 184")
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 184, "同模式重启应显示 184")
+    // 随后穿透还原紧凑 144。
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 144, "随后穿透应为 144")
+    let passthrough = HudFrameGeometry.listModeFrame(current: fitted, baseHeight: base, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144, screens: [a], main: a)
+    try check(passthrough.height == 144, "穿透切换应还原 144")
+
+    // 初次适配超过最小值（如有任务实测 340）：基准存实测全高，同模式刷新与重启不丢高度。
+    let tallBase = HudFrameGeometry.firstFitBaseHeight(measuredHeight: 340, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
+    try check(tallBase == 340, "实测超最小值应存全高 340")
+    let tall = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 340, snapEdge: .right, screens: [a], main: a)
+    try check(tall.height == 340 && tall.maxX == 1920, "超最小值内容适配应贴右")
+    try check(HudFrameGeometry.listHeight(baseHeight: tallBase, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 340, "同模式刷新应保持 340")
+    let tallRestart = HudFrameGeometry.restoredFrame(HudFrameGeometry.persistedListFrame(actual: tall, baseHeight: tallBase), screens: [a], main: a)
+    try check(tallRestart.height == 340, "重启应保持 340 不丢高度")
+}
+
+func checkHudManualVsPassthroughCollapseHeight() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    let quadrants = CGRect(x: 600, y: 30, width: 720, height: 592)
+    // 同一四象限窗口，两条入口选同一边；仅模式决定显示高度（交互 184 / 穿透 144）。
+    let interactiveHeight = HudFrameGeometry.listHeight(baseHeight: 144, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
+    let passthroughHeight = HudFrameGeometry.listHeight(baseHeight: 144, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144)
+    let manual = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: interactiveHeight), screens: [a], main: a)
+    let passthrough = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: passthroughHeight), screens: [a], main: a)
+    try check(manual.minX == 0 && passthrough.minX == 0, "两条入口应贴同一水平边")
+    try check(manual.height == 184 && passthrough.height == 144, "交互含工具栏 184、穿透紧凑 144")
+}
+
+func checkHudLegacyPreference300AndUserDragRoundTrip() throws {
+    let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
+    func frame(_ height: CGFloat) -> CGRect { CGRect(x: 100, y: 400, width: 380, height: height) }
+
+    // 旧偏好 300 启动：交互/穿透都应为 300，不被抬到 340。
+    var base: CGFloat = 300
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "旧偏好 300 交互启动应为 300")
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "旧偏好 300 穿透启动应为 300")
+    let startup = HudFrameGeometry.restoredFrame(HudFrameGeometry.persistedListFrame(actual: frame(300), baseHeight: base), screens: [a], main: a)
+    try check(startup.height == 300, "旧偏好 300 重启应恢复 300")
+
+    // 用户从交互 184 实际拖到 300：基准更新为 300 并持久化。
+    base = 144
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 184, "紧凑 144 交互显示 184")
+    base = HudFrameGeometry.updatedListBaseHeight(actualHeight: 300, currentBaseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
+    try check(base == 300, "用户拖到 300 应更新基准 300")
+    var persisted = HudFrameGeometry.persistedListFrame(actual: frame(300), baseHeight: base).height
+    try check(persisted == 300, "应持久化 300")
+
+    // 来回切换与重启：交互/穿透/再交互/重启都保持 300，不再变 340。
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "再交互应保持 300")
+    try check(HudFrameGeometry.listHeight(baseHeight: base, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144) == 300, "穿透应保持 300")
+    base = persisted
+    let restarted = HudFrameGeometry.restoredFrame(HudFrameGeometry.persistedListFrame(actual: frame(300), baseHeight: base), screens: [a], main: a)
+    try check(restarted.height == 300 && base == 300, "重启后基准与高度仍 300")
+
+    // 仅调宽（高度仍 300）不改变基准。
+    let widthOnly = HudFrameGeometry.updatedListBaseHeight(actualHeight: 300, currentBaseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
+    try check(widthOnly == 300, "仅调宽应保留 300")
+}
+
+func checkHudCollapseRealFrameReproduction() throws {
+    // 用户实测：四象限 {{1296,543},{623,507}}，合成可用区右沿 1920、上沿 1050。
+    let visible = CGRect(x: 0, y: 0, width: 1920, height: 1050)
+    let a = hudScreen(visible, visible: visible)
+    let quadrants = CGRect(x: 1296, y: 543, width: 623, height: 507)
+    let listSize = CGSize(width: 380, height: 300)
+
+    // 顶沿间距为 0（碰顶），旧四边算法会选顶导致水平滞留 x=1296；新算法仅选水平较近右缘。
+    try check(visible.maxY - quadrants.maxY == 0, "原窗口碰顶（旧算法会误选顶）")
+    try check(HudFrameGeometry.collapseSide(frame: quadrants, visible: visible) == .right, "碰顶仍应选较近的右缘")
+    let collapsed = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: listSize, screens: [a], main: a)
+    try check(collapsed.minX == 1540 && collapsed.maxX == 1920, "新版应 x=1540 右沿 1920，实际: \(collapsed)")
+    try check(collapsed.minX - quadrants.minX == 244, "应比旧输出 x=1296 右移 244 点")
+    try check(collapsed.maxY == quadrants.maxY && collapsed.height == 300, "垂直位置保留且尺寸不变")
+    try check(rectContains(visible, collapsed), "保持可见")
+
+    // 左侧覆盖：近左四象限应收向左缘。
+    let leftQuadrants = CGRect(x: 1, y: 543, width: 623, height: 507)
+    try check(HudFrameGeometry.collapseSide(frame: leftQuadrants, visible: visible) == .left, "近左应选左")
+    let leftCollapsed = HudFrameGeometry.collapsedListFrame(current: leftQuadrants, targetSize: listSize, screens: [a], main: a)
+    try check(leftCollapsed.minX == 0 && leftCollapsed.maxY == quadrants.maxY, "左侧应收向左缘并保留垂直，实际: \(leftCollapsed)")
 }
