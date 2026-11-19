@@ -105,17 +105,18 @@ let checks: [Check] = [
     ("HudFrameGeometry.listModeFrame clamps growth at screen bottom", checkHudListModeBottomEdgeClamp),
     ("HudFrameGeometry.listHeight raises saved compact size for interactive", checkHudListModeSavedOldSizeRestore),
     ("HudFrameGeometry list base height survives quadrants round-trip and restart", checkHudListBaseHeightPersistenceChain),
-    ("HudFrameGeometry collapse snaps to nearest of four edges", checkHudSnapNearestEdgeFourSides),
+    ("HudFrameGeometry collapse snaps horizontally to nearer left/right side", checkHudCollapseSideHorizontalOnly),
     ("HudFrameGeometry snap tie-break is deterministic preferring left/right", checkHudSnapTieDeterministic),
     ("HudFrameGeometry collapse handles multi-screen negative coordinates", checkHudSnapMultiScreenNegativeCoords),
     ("HudFrameGeometry restoring quadrants recovers pre-collapse frame", checkHudSnapRestoreQuadrantsFrame),
     ("HudFrameGeometry expand/general switch does not snap to edge", checkHudExpandSwitchDoesNotSnap),
-    ("HudFrameGeometry collapse content-fit re-aligns bottom edge and persists", checkHudCollapseContentFitRealignsBottom),
+    ("HudFrameGeometry collapse content-fit re-aligns right side and persists", checkHudCollapseContentFitRealignsRightSide),
     ("HudFrameGeometry collapse content-fit keeps left edge aligned", checkHudCollapseContentFitLeftEdge),
     ("HudFrameGeometry manual interactive collapse snaps and keeps compact base", checkHudManualCollapseSnapsKeepsCompactBase),
     ("HudFrameGeometry manual collapse no-history content-fit keeps measured height", checkHudManualCollapseNoHistoryContentFit),
     ("HudFrameGeometry manual vs passthrough collapse differ only by mode height", checkHudManualVsPassthroughCollapseHeight),
     ("HudFrameGeometry legacy 300 preference and user drag round-trip keep 300", checkHudLegacyPreference300AndUserDragRoundTrip),
+    ("HudFrameGeometry real-world collapse frame snaps right instead of stagnating", checkHudCollapseRealFrameReproduction),
     ("TodoStore sorts open items by priority then due date", checkSortsOpenItemsByPriorityThenDueDate),
     ("TodoStore sinks overdue items to bottom", checkSortsOverdueItemsToBottom),
     ("TodoStore sorts items without due date after those with", checkSortsItemsWithoutDueDateLast),
@@ -1778,48 +1779,46 @@ func checkHudListBaseHeightPersistenceChain() throws {
     try check(persisted == 144, "仅移动应保留基准 144")
 }
 
-func checkHudSnapNearestEdgeFourSides() throws {
+func checkHudCollapseSideHorizontalOnly() throws {
     let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
     let listSize = CGSize(width: 380, height: 144)
 
     let nearLeft = CGRect(x: 10, y: 300, width: 720, height: 592)
-    try check(HudFrameGeometry.nearestSnapEdge(frame: nearLeft, visible: a.visibleFrame) == .left, "靠近左边应选左")
+    try check(HudFrameGeometry.collapseSide(frame: nearLeft, visible: a.visibleFrame) == .left, "靠近左边应选左")
     let left = HudFrameGeometry.collapsedListFrame(current: nearLeft, targetSize: listSize, screens: [a], main: a)
     try check(left.minX == 0 && left.size == listSize && rectContains(a.visibleFrame, left), "应贴左边缘并保持尺寸，实际: \(left)")
 
     let nearRight = CGRect(x: 1190, y: 300, width: 720, height: 592)
-    try check(HudFrameGeometry.nearestSnapEdge(frame: nearRight, visible: a.visibleFrame) == .right, "靠近右边应选右")
+    try check(HudFrameGeometry.collapseSide(frame: nearRight, visible: a.visibleFrame) == .right, "靠近右边应选右")
     let right = HudFrameGeometry.collapsedListFrame(current: nearRight, targetSize: listSize, screens: [a], main: a)
     try check(right.maxX == 1920 && rectContains(a.visibleFrame, right), "应贴右边缘，实际: \(right)")
 
-    let nearBottom = CGRect(x: 600, y: 30, width: 720, height: 592)
-    try check(HudFrameGeometry.nearestSnapEdge(frame: nearBottom, visible: a.visibleFrame) == .bottom, "靠近下边应选下")
-    let bottom = HudFrameGeometry.collapsedListFrame(current: nearBottom, targetSize: listSize, screens: [a], main: a)
-    try check(bottom.minY == 25 && rectContains(a.visibleFrame, bottom), "应贴下边缘，实际: \(bottom)")
+    // 关键回归：近底但右更近——顶/底再近也不得使水平位置滞留，应贴右。
+    let bottomButRight = CGRect(x: 1190, y: 30, width: 720, height: 592)
+    try check(HudFrameGeometry.collapseSide(frame: bottomButRight, visible: a.visibleFrame) == .right, "底边再近也应选较近的右")
+    let br = HudFrameGeometry.collapsedListFrame(current: bottomButRight, targetSize: listSize, screens: [a], main: a)
+    try check(br.maxX == 1920 && br.minY != 25, "应水平贴右而非滞留/贴底，实际: \(br)")
 
-    let nearTop = CGRect(x: 600, y: 480, width: 720, height: 592)
-    try check(HudFrameGeometry.nearestSnapEdge(frame: nearTop, visible: a.visibleFrame) == .top, "靠近上边应选上")
-    let top = HudFrameGeometry.collapsedListFrame(current: nearTop, targetSize: listSize, screens: [a], main: a)
-    try check(top.maxY == 1080 && rectContains(a.visibleFrame, top), "应贴上边缘，实际: \(top)")
+    // 近顶但左更近：应贴左。
+    let topButLeft = CGRect(x: 10, y: 480, width: 720, height: 592)
+    try check(HudFrameGeometry.collapseSide(frame: topButLeft, visible: a.visibleFrame) == .left, "顶边再近也应选较近的左")
+    let tl = HudFrameGeometry.collapsedListFrame(current: topButLeft, targetSize: listSize, screens: [a], main: a)
+    try check(tl.minX == 0, "应水平贴左，实际: \(tl)")
 
     let touching = CGRect(x: 0, y: 300, width: 720, height: 592)
-    try check(HudFrameGeometry.edgeGaps(frame: touching, visible: a.visibleFrame)[.left] == 0, "已碰边间距应为零")
-    try check(HudFrameGeometry.nearestSnapEdge(frame: touching, visible: a.visibleFrame) == .left, "碰边应优先选该边")
+    try check(HudFrameGeometry.collapseSide(frame: touching, visible: a.visibleFrame) == .left, "碰左缘应选左")
 }
 
 func checkHudSnapTieDeterministic() throws {
     let wide = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
-    // 左右间距相等且最小 → 优先左。
-    let lrTie = CGRect(x: 10, y: 500, width: 1900, height: 100)
-    try check(HudFrameGeometry.nearestSnapEdge(frame: lrTie, visible: wide.visibleFrame) == .left, "左右平局应选左")
+    // 左右间距相等 → 优先左。
+    let lrTie = CGRect(x: 600, y: 500, width: 720, height: 100)
+    try check(HudFrameGeometry.collapseSide(frame: lrTie, visible: wide.visibleFrame) == .left, "左右平局应选左")
 
     let square = hudScreen(CGRect(x: 0, y: 0, width: 1000, height: 1000), visible: CGRect(x: 0, y: 0, width: 1000, height: 1000))
-    // 左下相等且最小 → 优先左右边。
-    let lbTie = CGRect(x: 100, y: 100, width: 200, height: 200)
-    try check(HudFrameGeometry.nearestSnapEdge(frame: lbTie, visible: square.visibleFrame) == .left, "左下平局应优先左")
-    // 四边全相等 → 确定顺序取左。
-    let allTie = CGRect(x: 400, y: 400, width: 200, height: 200)
-    try check(HudFrameGeometry.nearestSnapEdge(frame: allTie, visible: square.visibleFrame) == .left, "四边平局应确定选左")
+    // 水平居中（左右相等）且垂直更近底：仍只选水平边，平局取左。
+    let centered = CGRect(x: 400, y: 100, width: 200, height: 200)
+    try check(HudFrameGeometry.collapseSide(frame: centered, visible: square.visibleFrame) == .left, "水平平局应确定选左，不受垂直近边影响")
 }
 
 func checkHudSnapMultiScreenNegativeCoords() throws {
@@ -1830,7 +1829,7 @@ func checkHudSnapMultiScreenNegativeCoords() throws {
     // 负坐标屏 B 上靠近其左边：应选 B 并贴 B 的左缘（负坐标）。
     let onB = CGRect(x: -1910, y: 300, width: 720, height: 592)
     let collapsedB = HudFrameGeometry.collapsedListFrame(current: onB, targetSize: listSize, screens: [a, b], main: a)
-    try check(HudFrameGeometry.nearestSnapEdge(frame: onB, visible: b.visibleFrame) == .left, "B 屏靠近左边应选左")
+    try check(HudFrameGeometry.collapseSide(frame: onB, visible: b.visibleFrame) == .left, "B 屏靠近左边应选左")
     try check(collapsedB.minX == -1920 && rectContains(b.visibleFrame, collapsedB), "应贴 B 屏负坐标左缘，实际: \(collapsedB)")
     try check(collapsedB.maxX < 0 && collapsedB.size == listSize, "应留在 B 屏并保持尺寸")
 
@@ -1868,38 +1867,34 @@ func checkHudExpandSwitchDoesNotSnap() throws {
     let manual = HudFrameGeometry.switchedFrame(current: current, targetSize: listSize, screens: [a], main: a)
     try check(manual.minX == 600 && manual.maxY == 892, "展开/一般切换应保留左上角不吸边，实际: \(manual)")
 
-    // 同一窗口四象限收为列表则会吸边（此处最近为上边），形成对照。
+    // 同一窗口四象限收为列表则水平吸边（此处左右平局取左），形成对照。
     let collapsed = HudFrameGeometry.collapsedListFrame(current: current, targetSize: listSize, screens: [a], main: a)
-    try check(collapsed.maxY == 1080 && manual.maxY != 1080, "收起应吸边而展开不应，实际: \(collapsed)")
+    try check(collapsed.minX == 0 && manual.minX == 600, "收起应水平吸边而展开不应，实际: \(collapsed)")
 }
 
-func checkHudCollapseContentFitRealignsBottom() throws {
+func checkHudCollapseContentFitRealignsRightSide() throws {
     let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
-    // 无历史列表尺寸：四象限近底收起用默认 460 高贴底。
-    let quadrants = CGRect(x: 600, y: 30, width: 720, height: 592)
-    try check(HudFrameGeometry.nearestSnapEdge(frame: quadrants, visible: a.visibleFrame) == .bottom, "近底应选下边")
+    // 无历史列表尺寸：四象限近右收起用默认 460 高贴右。
+    let quadrants = CGRect(x: 1190, y: 30, width: 720, height: 592)
+    try check(HudFrameGeometry.collapseSide(frame: quadrants, visible: a.visibleFrame) == .right, "近右应选右")
     let collapsed = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: 460), screens: [a], main: a)
-    try check(collapsed.minY == 25 && collapsed.height == 460, "收起应以 460 高贴底，实际: \(collapsed)")
+    try check(collapsed.maxX == 1920 && collapsed.height == 460, "收起应以 460 高贴右，实际: \(collapsed)")
 
-    // 内容适配实测 144：最终尺寸确定后应沿下边重对齐，底边不离开 visibleFrame.minY。
-    let fitted = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 144, snapEdge: .bottom, screens: [a], main: a)
-    try check(fitted.height == 144 && fitted.minY == 25, "内容适配后应仍贴底，实际: \(fitted)")
+    // 内容适配实测 144：最终尺寸确定后仍贴右，垂直位置保留。
+    let fitted = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 144, snapEdge: .right, screens: [a], main: a)
+    try check(fitted.height == 144 && fitted.maxX == 1920 && fitted.maxY == collapsed.maxY, "内容适配后应仍贴右且保留垂直位置，实际: \(fitted)")
 
-    // 持久化与重启：最终 frame 高度 144、底边位置保留。
+    // 持久化与重启：最终 frame 高度 144、右缘位置保留。
     let persisted = HudFrameGeometry.persistedListFrame(actual: fitted, baseHeight: 144)
-    try check(persisted.height == 144 && persisted.minY == 25, "应持久化最终贴底 frame")
+    try check(persisted.height == 144 && persisted.maxX == 1920, "应持久化最终贴右 frame")
     let restarted = HudFrameGeometry.restoredFrame(persisted, screens: [a], main: a)
-    try check(restarted.minY == 25 && restarted.height == 144, "重启应恢复贴底位置，实际: \(restarted)")
-
-    // 对照：无贴边状态（手动）不重对齐，收缩后底边上移——证明重对齐仅作用于收起。
-    let manual = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 144, snapEdge: nil, screens: [a], main: a)
-    try check(manual.minY == 341 && manual.minY != 25, "手动/无贴边状态不应吸底，实际: \(manual)")
+    try check(restarted.maxX == 1920 && restarted.height == 144, "重启应恢复贴右位置，实际: \(restarted)")
 }
 
 func checkHudCollapseContentFitLeftEdge() throws {
     let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
     let quadrants = CGRect(x: 10, y: 300, width: 720, height: 592)
-    try check(HudFrameGeometry.nearestSnapEdge(frame: quadrants, visible: a.visibleFrame) == .left, "近左应选左边")
+    try check(HudFrameGeometry.collapseSide(frame: quadrants, visible: a.visibleFrame) == .left, "近左应选左边")
     let collapsed = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: 460), screens: [a], main: a)
     try check(collapsed.minX == 0, "收起应贴左")
     let fitted = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 144, snapEdge: .left, screens: [a], main: a)
@@ -1908,14 +1903,14 @@ func checkHudCollapseContentFitLeftEdge() throws {
 
 func checkHudManualCollapseSnapsKeepsCompactBase() throws {
     let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
-    let quadrants = CGRect(x: 600, y: 30, width: 720, height: 592)
-    try check(HudFrameGeometry.nearestSnapEdge(frame: quadrants, visible: a.visibleFrame) == .bottom, "近底应选下边")
+    let quadrants = CGRect(x: 1190, y: 30, width: 720, height: 592)
+    try check(HudFrameGeometry.collapseSide(frame: quadrants, visible: a.visibleFrame) == .right, "近右应选右")
 
-    // 交互手动「单列」收起：显示高含工具栏 184，仍贴最近边。
+    // 交互手动「单列」收起：显示高含工具栏 184，仍水平贴最近边。
     let interactiveHeight = HudFrameGeometry.listHeight(baseHeight: 144, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
     try check(interactiveHeight == 184, "交互列表显示应含工具栏 184")
     let collapsed = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: interactiveHeight), screens: [a], main: a)
-    try check(collapsed.minY == 25 && collapsed.height == 184, "手动收起应贴底且工具栏可见，实际: \(collapsed)")
+    try check(collapsed.maxX == 1920 && collapsed.height == 184, "手动收起应贴右且工具栏可见，实际: \(collapsed)")
 
     // 工具栏临时增高不得污染紧凑基准：持久化高度仍 144。
     let persisted = HudFrameGeometry.persistedListFrame(actual: collapsed, baseHeight: 144)
@@ -1928,21 +1923,21 @@ func checkHudManualCollapseSnapsKeepsCompactBase() throws {
 
 func checkHudManualCollapseNoHistoryContentFit() throws {
     let a = hudScreen(CGRect(x: 0, y: 0, width: 1920, height: 1080), visible: CGRect(x: 0, y: 25, width: 1920, height: 1055))
-    let quadrants = CGRect(x: 600, y: 30, width: 720, height: 592)
-    // 无历史列表尺寸：默认 460 贴底（交互最小值不高于 460）。
+    let quadrants = CGRect(x: 1190, y: 30, width: 720, height: 592)
+    // 无历史列表尺寸：默认 460 贴右（交互最小值不高于 460）。
     let provisionalHeight = HudFrameGeometry.listHeight(baseHeight: 460, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
     try check(provisionalHeight == 460, "默认 460 交互显示应为 460")
     let collapsed = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: provisionalHeight), screens: [a], main: a)
-    try check(collapsed.minY == 25 && collapsed.height == 460, "无历史收起应先贴底")
+    try check(collapsed.maxX == 1920 && collapsed.height == 460, "无历史收起应先贴右")
 
     // 首次内容适配实测交互空列表 184：调用实际基准选择逻辑，偏好基准应为穿透最小值 144，
-    // 窗口仍显示 184 并沿下边重对齐。
-    let fitted = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 184, snapEdge: .bottom, screens: [a], main: a)
-    try check(fitted.height == 184 && fitted.minY == 25, "交互显示应 184 且贴底，实际: \(fitted)")
+    // 窗口仍显示 184 并沿右侧重对齐。
+    let fitted = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 184, snapEdge: .right, screens: [a], main: a)
+    try check(fitted.height == 184 && fitted.maxX == 1920, "交互显示应 184 且贴右，实际: \(fitted)")
     let base = HudFrameGeometry.firstFitBaseHeight(measuredHeight: 184, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
     try check(base == 144, "无历史交互空列表首次测量偏好基准应为 144")
     let persisted = HudFrameGeometry.persistedListFrame(actual: fitted, baseHeight: base)
-    try check(persisted.height == 144 && persisted.minY == 25, "应持久化基准 144 与贴底位置")
+    try check(persisted.height == 144 && persisted.maxX == 1920, "应持久化基准 144 与贴右位置")
     // 同模式刷新与重启仍显示 184。
     let refreshed = HudFrameGeometry.listModeFrame(current: fitted, baseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144, screens: [a], main: a)
     try check(refreshed.height == 184, "同模式刷新应保持显示 184")
@@ -1955,8 +1950,8 @@ func checkHudManualCollapseNoHistoryContentFit() throws {
     // 初次适配超过最小值（如有任务实测 340）：基准存实测全高，同模式刷新与重启不丢高度。
     let tallBase = HudFrameGeometry.firstFitBaseHeight(measuredHeight: 340, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
     try check(tallBase == 340, "实测超最小值应存全高 340")
-    let tall = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 340, snapEdge: .bottom, screens: [a], main: a)
-    try check(tall.height == 340 && tall.minY == 25, "超最小值内容适配应贴底")
+    let tall = HudFrameGeometry.contentFittedListFrame(current: collapsed, finalHeight: 340, snapEdge: .right, screens: [a], main: a)
+    try check(tall.height == 340 && tall.maxX == 1920, "超最小值内容适配应贴右")
     try check(HudFrameGeometry.listHeight(baseHeight: tallBase, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144) == 340, "同模式刷新应保持 340")
     let tallRestart = HudFrameGeometry.restoredFrame(HudFrameGeometry.persistedListFrame(actual: tall, baseHeight: tallBase), screens: [a], main: a)
     try check(tallRestart.height == 340, "重启应保持 340 不丢高度")
@@ -1970,7 +1965,7 @@ func checkHudManualVsPassthroughCollapseHeight() throws {
     let passthroughHeight = HudFrameGeometry.listHeight(baseHeight: 144, interactive: false, interactiveMinimum: 184, passthroughMinimum: 144)
     let manual = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: interactiveHeight), screens: [a], main: a)
     let passthrough = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: CGSize(width: 380, height: passthroughHeight), screens: [a], main: a)
-    try check(manual.minY == 25 && passthrough.minY == 25, "两条入口应贴同一边")
+    try check(manual.minX == 0 && passthrough.minX == 0, "两条入口应贴同一水平边")
     try check(manual.height == 184 && passthrough.height == 144, "交互含工具栏 184、穿透紧凑 144")
 }
 
@@ -2003,4 +1998,27 @@ func checkHudLegacyPreference300AndUserDragRoundTrip() throws {
     // 仅调宽（高度仍 300）不改变基准。
     let widthOnly = HudFrameGeometry.updatedListBaseHeight(actualHeight: 300, currentBaseHeight: base, interactive: true, interactiveMinimum: 184, passthroughMinimum: 144)
     try check(widthOnly == 300, "仅调宽应保留 300")
+}
+
+func checkHudCollapseRealFrameReproduction() throws {
+    // 用户实测：四象限 {{1296,543},{623,507}}，合成可用区右沿 1920、上沿 1050。
+    let visible = CGRect(x: 0, y: 0, width: 1920, height: 1050)
+    let a = hudScreen(visible, visible: visible)
+    let quadrants = CGRect(x: 1296, y: 543, width: 623, height: 507)
+    let listSize = CGSize(width: 380, height: 300)
+
+    // 顶沿间距为 0（碰顶），旧四边算法会选顶导致水平滞留 x=1296；新算法仅选水平较近右缘。
+    try check(visible.maxY - quadrants.maxY == 0, "原窗口碰顶（旧算法会误选顶）")
+    try check(HudFrameGeometry.collapseSide(frame: quadrants, visible: visible) == .right, "碰顶仍应选较近的右缘")
+    let collapsed = HudFrameGeometry.collapsedListFrame(current: quadrants, targetSize: listSize, screens: [a], main: a)
+    try check(collapsed.minX == 1540 && collapsed.maxX == 1920, "新版应 x=1540 右沿 1920，实际: \(collapsed)")
+    try check(collapsed.minX - quadrants.minX == 244, "应比旧输出 x=1296 右移 244 点")
+    try check(collapsed.maxY == quadrants.maxY && collapsed.height == 300, "垂直位置保留且尺寸不变")
+    try check(rectContains(visible, collapsed), "保持可见")
+
+    // 左侧覆盖：近左四象限应收向左缘。
+    let leftQuadrants = CGRect(x: 1, y: 543, width: 623, height: 507)
+    try check(HudFrameGeometry.collapseSide(frame: leftQuadrants, visible: visible) == .left, "近左应选左")
+    let leftCollapsed = HudFrameGeometry.collapsedListFrame(current: leftQuadrants, targetSize: listSize, screens: [a], main: a)
+    try check(leftCollapsed.minX == 0 && leftCollapsed.maxY == quadrants.maxY, "左侧应收向左缘并保留垂直，实际: \(leftCollapsed)")
 }

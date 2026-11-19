@@ -54,6 +54,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["GHOSTPIN_WINDOW_SELFTEST"] != nil {
+            let frames = Self.appState?.windowCoordinator.runGeometrySelfTest() ?? [:]
+            for key in ["quadrants", "manualList", "passthroughList", "expandRestore", "manualListLeft"] {
+                if let frame = frames[key] {
+                    print("SELFTEST \(key) \(NSStringFromRect(frame))")
+                }
+            }
+            exit(0)
+        }
+        #endif
         Self.appState?.start()
     }
 

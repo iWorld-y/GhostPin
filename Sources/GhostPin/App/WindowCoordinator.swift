@@ -21,6 +21,11 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     private var lastHudMode: HudMode = .passthrough
     /// 收起时所选贴边（仅无历史列表尺寸、待内容适配时暂存）；最终尺寸确定后消费，手动切换/重新展开/用户调整时清除。
     private var pendingSnapEdge: HudSnapEdge?
+    #if DEBUG
+    /// 几何自测注入的合成屏幕，避免读取用户显示器信息；仅 DEBUG 自测使用。
+    static var testScreens: [HudScreen]?
+    static var testMainScreen: HudScreen?
+    #endif
 
     var isBoardVisible: Bool {
         boardWindow?.isVisible == true
@@ -208,7 +213,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             )
             // 无历史列表尺寸时随后会内容适配，暂存所选边以便最终尺寸确定后重对齐。
             if saved == nil, let screen = Self.screen(for: oldFrame) {
-                pendingSnapEdge = HudFrameGeometry.nearestSnapEdge(frame: oldFrame, visible: screen.visibleFrame)
+                pendingSnapEdge = HudFrameGeometry.collapseSide(frame: oldFrame, visible: screen.visibleFrame)
             }
         } else if restoringCollapsedQuadrants, let saved {
             frame = HudFrameGeometry.restoredFrame(saved.nsRect, screens: Self.hudScreens(), main: Self.mainHudScreen())
@@ -284,11 +289,21 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     }
 
     private static func hudScreens() -> [HudScreen] {
-        NSScreen.screens.map { HudScreen(frame: $0.frame, visibleFrame: $0.visibleFrame) }
+        #if DEBUG
+        if let testScreens {
+            return testScreens
+        }
+        #endif
+        return NSScreen.screens.map { HudScreen(frame: $0.frame, visibleFrame: $0.visibleFrame) }
     }
 
     private static func mainHudScreen() -> HudScreen? {
-        NSScreen.main.map { HudScreen(frame: $0.frame, visibleFrame: $0.visibleFrame) }
+        #if DEBUG
+        if let testMainScreen {
+            return testMainScreen
+        }
+        #endif
+        return NSScreen.main.map { HudScreen(frame: $0.frame, visibleFrame: $0.visibleFrame) }
     }
 
     private static func screen(for frame: CGRect) -> HudScreen? {
@@ -393,6 +408,80 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             )
         }
     }
+
+    #if DEBUG
+    /// 几何自测：以合成屏幕驱动真实布局切换方法，读取隐藏窗口稳定后的实际 frame。
+    /// 不显示/不激活窗口、不读取用户显示器或指针；仅 DEBUG + GHOSTPIN_WINDOW_SELFTEST 触发。
+    func runGeometrySelfTest() -> [String: NSRect] {
+        guard let appState else { return [:] }
+        let visible = CGRect(x: 0, y: 0, width: 1920, height: 1050)
+        let screen = HudScreen(frame: visible, visibleFrame: visible)
+        Self.testScreens = [screen]
+        Self.testMainScreen = screen
+
+        let window = HUDPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 592),
+            styleMask: [.borderless, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.delegate = self
+        boardWindow = window
+        var results: [String: NSRect] = [:]
+
+        func reset(_ quadrants: NSRect) {
+            isSwitchingLayout = true
+            window.setFrame(quadrants, display: false)
+            isSwitchingLayout = false
+            currentLayout = .quadrants
+            listBaseHeight = 300
+            needsInitialHUDHeight = false
+            pendingSnapEdge = nil
+            lastHudMode = .interactive
+            appState.preferences.hudMode = .interactive
+            appState.preferences.hudInteractiveView = .quadrants
+            appState.preferences.hudFrame = HudWindowFrame(x: 1296, y: 750, width: 380, height: 300)
+            appState.preferences.hudQuadrantsFrame = HudWindowFrame(x: quadrants.origin.x, y: quadrants.origin.y, width: quadrants.width, height: quadrants.height)
+        }
+
+        // 右缘案例（用户实测四象限 frame）
+        let rightQuadrants = NSRect(x: 1296, y: 543, width: 623, height: 507)
+        reset(rightQuadrants)
+        results["quadrants"] = window.frame
+        // A 手动单列：交互四象限→交互列表
+        appState.preferences.hudInteractiveView = .list
+        applyHudLayout()
+        applyHudModeMetrics()
+        results["manualList"] = window.frame
+        // B 穿透收起：交互四象限→穿透列表
+        reset(rightQuadrants)
+        appState.preferences.hudMode = .passthrough
+        applyHudLayout()
+        applyHudModeMetrics()
+        results["passthroughList"] = window.frame
+        // C 展开恢复：穿透列表→交互四象限
+        lastHudMode = .passthrough
+        appState.preferences.hudMode = .interactive
+        applyHudLayout()
+        results["expandRestore"] = window.frame
+
+        // 左缘案例
+        reset(NSRect(x: 10, y: 543, width: 623, height: 507))
+        appState.preferences.hudInteractiveView = .list
+        applyHudLayout()
+        applyHudModeMetrics()
+        results["manualListLeft"] = window.frame
+
+        window.delegate = nil
+        boardWindow = nil
+        Self.testScreens = nil
+        Self.testMainScreen = nil
+        return results
+    }
+    #endif
 }
 
 private final class HUDPanel: NSPanel {

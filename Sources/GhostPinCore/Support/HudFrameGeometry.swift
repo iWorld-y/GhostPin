@@ -113,30 +113,12 @@ public enum HudFrameGeometry {
         CGRect(origin: CGPoint(x: actual.minX, y: actual.minY), size: CGSize(width: actual.width, height: baseHeight))
     }
 
-    /// 收起前窗口四条边到可用区对应边的间距；已碰边（含越界）算零。
-    public static func edgeGaps(frame: CGRect, visible: CGRect) -> [HudSnapEdge: CGFloat] {
-        [
-            .left: max(0, frame.minX - visible.minX),
-            .right: max(0, visible.maxX - frame.maxX),
-            .bottom: max(0, frame.minY - visible.minY),
-            .top: max(0, visible.maxY - frame.maxY)
-        ]
-    }
-
-    /// 选间距最小的边；平局按 left、right、bottom、top 的确定顺序取前者（优先左右边）。
-    public static func nearestSnapEdge(frame: CGRect, visible: CGRect) -> HudSnapEdge {
-        let gaps = edgeGaps(frame: frame, visible: visible)
-        let order: [HudSnapEdge] = [.left, .right, .bottom, .top]
-        var best = order[0]
-        var bestGap = gaps[best] ?? 0
-        for edge in order.dropFirst() {
-            let gap = gaps[edge] ?? 0
-            if gap < bestGap {
-                best = edge
-                bestGap = gap
-            }
-        }
-        return best
+    /// 收起选侧：缩窄时仅比较原窗口左/右间距，取较近的水平边（平局优先左）；
+    /// 顶/底再近也不参与，避免水平位置滞留。
+    public static func collapseSide(frame: CGRect, visible: CGRect) -> HudSnapEdge {
+        let leftGap = max(0, frame.minX - visible.minX)
+        let rightGap = max(0, visible.maxX - frame.maxX)
+        return rightGap < leftGap ? .right : .left
     }
 
     /// 贴到所选可用区边缘：所选轴贴边，另一轴尽量保持原位置并夹取，尺寸保持。
@@ -155,16 +137,16 @@ public enum HudFrameGeometry {
         return clamped(result, into: visible)
     }
 
-    /// 交互四象限→穿透列表的收起：以收起前窗口选当前屏可用区最近边，
-    /// 列表按目标尺寸保留左上角后贴到该边，另一轴夹取，保持可见与已选尺寸。
+    /// 四象限收为列表（交互手动与穿透两入口）：以原四象限选较近的左/右侧边，
+    /// 列表按目标尺寸保留垂直位置后水平贴该边并夹取，保持可见与已选尺寸。
     public static func collapsedListFrame(current: CGRect, targetSize: CGSize, screens: [HudScreen], main: HudScreen?) -> CGRect {
         let listFrame = switchedFrame(current: current, targetSize: targetSize, screens: screens, main: main)
         let screen = bestScreenIndex(for: current, screens: screens).map { screens[$0] } ?? main
         guard let screen else {
             return listFrame
         }
-        let edge = nearestSnapEdge(frame: current, visible: screen.visibleFrame)
-        return snappedFrame(frame: listFrame, edge: edge, visible: screen.visibleFrame)
+        let side = collapseSide(frame: current, visible: screen.visibleFrame)
+        return snappedFrame(frame: listFrame, edge: side, visible: screen.visibleFrame)
     }
 
     /// 内容适配确定最终高度后的列表 frame：先按左上角锚定收缩到最终高度，
