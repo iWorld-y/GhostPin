@@ -25,6 +25,8 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     /// 几何自测注入的合成屏幕，避免读取用户显示器信息；仅 DEBUG 自测使用。
     static var testScreens: [HudScreen]?
     static var testMainScreen: HudScreen?
+    /// 几何自测态：短路指针位置、激活/显示等桌面副作用。
+    static var isGeometrySelfTest = false
     #endif
 
     var isBoardVisible: Bool {
@@ -155,7 +157,15 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         applyHudModeMetrics()
         let interactive = appState.preferences.hudMode == .interactive
         boardWindow.ignoresMouseEvents = !interactive
+        #if DEBUG
+        if Self.isGeometrySelfTest {
+            isPointerInsideHUD = false
+        } else {
+            isPointerInsideHUD = boardWindow.frame.contains(NSEvent.mouseLocation)
+        }
+        #else
         isPointerInsideHUD = boardWindow.frame.contains(NSEvent.mouseLocation)
+        #endif
         boardWindow.alphaValue = targetHUDAlpha()
         boardWindow.collectionBehavior = appState.preferences.hudAllSpaces
             ? [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -344,6 +354,11 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     }
 
     func applyHUDInteraction() {
+        #if DEBUG
+        if Self.isGeometrySelfTest {
+            return
+        }
+        #endif
         guard let appState, let boardWindow else {
             return
         }
@@ -410,10 +425,12 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     }
 
     #if DEBUG
-    /// 几何自测：以合成屏幕驱动真实布局切换方法，读取隐藏窗口稳定后的实际 frame。
-    /// 不显示/不激活窗口、不读取用户显示器或指针；仅 DEBUG + GHOSTPIN_WINDOW_SELFTEST 触发。
-    func runGeometrySelfTest() -> [String: NSRect] {
-        guard let appState else { return [:] }
+    /// 几何自测：以合成屏幕经真实公开切换方法（setHudInteractiveView/toggleHUDMode）驱动，
+    /// 测试态短路指针/激活/显示副作用，runloop 处理后读取隐藏 panel 稳定 frame 并校验固定矩形。
+    /// 不显示/不激活窗口、不读用户显示器或指针；缺失/错误 frame 返回 false（调用方 exit 非零）。
+    func runGeometrySelfTest() -> Bool {
+        guard let appState else { return false }
+        Self.isGeometrySelfTest = true
         let visible = CGRect(x: 0, y: 0, width: 1920, height: 1050)
         let screen = HudScreen(frame: visible, visibleFrame: visible)
         Self.testScreens = [screen]
@@ -430,7 +447,11 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         window.backgroundColor = .clear
         window.delegate = self
         boardWindow = window
-        var results: [String: NSRect] = [:]
+
+        let rightQuadrants = NSRect(x: 1296, y: 543, width: 623, height: 507)
+        let expectedList = NSRect(x: 1540, y: 750, width: 380, height: 300)
+        let expectedLeft = NSRect(x: 0, y: 750, width: 380, height: 300)
+        var ok = true
 
         func reset(_ quadrants: NSRect) {
             isSwitchingLayout = true
@@ -440,46 +461,44 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             listBaseHeight = 300
             needsInitialHUDHeight = false
             pendingSnapEdge = nil
-            lastHudMode = .interactive
             appState.preferences.hudMode = .interactive
             appState.preferences.hudInteractiveView = .quadrants
             appState.preferences.hudFrame = HudWindowFrame(x: 1296, y: 750, width: 380, height: 300)
             appState.preferences.hudQuadrantsFrame = HudWindowFrame(x: quadrants.origin.x, y: quadrants.origin.y, width: quadrants.width, height: quadrants.height)
+            updateHUD()   // 自然建立 lastHudMode，不手填
+        }
+        func expect(_ name: String, _ expected: NSRect) {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            let actual = window.frame
+            let pass = actual == expected
+            print("SELFTEST \(name) \(NSStringFromRect(actual)) expected \(NSStringFromRect(expected)) \(pass ? "PASS" : "FAIL")")
+            ok = ok && pass
         }
 
         // 右缘案例（用户实测四象限 frame）
-        let rightQuadrants = NSRect(x: 1296, y: 543, width: 623, height: 507)
         reset(rightQuadrants)
-        results["quadrants"] = window.frame
-        // A 手动单列：交互四象限→交互列表
-        appState.preferences.hudInteractiveView = .list
-        applyHudLayout()
-        applyHudModeMetrics()
-        results["manualList"] = window.frame
-        // B 穿透收起：交互四象限→穿透列表
+        expect("quadrants", rightQuadrants)
+        // A 手动单列：真实公开方法
+        appState.setHudInteractiveView(.list)
+        expect("manualList", expectedList)
+        // B 穿透收起：真实公开方法
         reset(rightQuadrants)
-        appState.preferences.hudMode = .passthrough
-        applyHudLayout()
-        applyHudModeMetrics()
-        results["passthroughList"] = window.frame
-        // C 展开恢复：穿透列表→交互四象限
-        lastHudMode = .passthrough
-        appState.preferences.hudMode = .interactive
-        applyHudLayout()
-        results["expandRestore"] = window.frame
-
+        appState.toggleHUDMode()
+        expect("passthroughList", expectedList)
+        // C 展开恢复：再次 toggle，lastHudMode 由 updateHUD 自然记录
+        appState.toggleHUDMode()
+        expect("expandRestore", rightQuadrants)
         // 左缘案例
-        reset(NSRect(x: 10, y: 543, width: 623, height: 507))
-        appState.preferences.hudInteractiveView = .list
-        applyHudLayout()
-        applyHudModeMetrics()
-        results["manualListLeft"] = window.frame
+        reset(NSRect(x: 1, y: 543, width: 623, height: 507))
+        appState.setHudInteractiveView(.list)
+        expect("manualListLeft", expectedLeft)
 
         window.delegate = nil
         boardWindow = nil
         Self.testScreens = nil
         Self.testMainScreen = nil
-        return results
+        Self.isGeometrySelfTest = false
+        return ok
     }
     #endif
 }
