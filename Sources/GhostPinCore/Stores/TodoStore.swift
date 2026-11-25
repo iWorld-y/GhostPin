@@ -44,9 +44,10 @@ public final class TodoStore: ObservableObject {
     public func add(
         title: String,
         group: String,
+        important: Bool,
+        urgent: Bool,
         createdAt: Date = Date(),
         reminderAt: Date? = nil,
-        priority: Priority = .medium,
         dueAt: Date? = nil,
         description: String? = nil
     ) throws -> TodoItem? {
@@ -64,9 +65,10 @@ public final class TodoStore: ObservableObject {
                 id: document.nextID,
                 group: normalizedGroup,
                 title: trimmed,
+                important: important,
+                urgent: urgent,
                 createdAt: createdAt,
                 reminderAt: reminderAt,
-                priority: priority,
                 dueAt: dueAt,
                 description: description
             )
@@ -140,7 +142,8 @@ public final class TodoStore: ObservableObject {
         title: String? = nil,
         reminderAt: Date? = nil,
         clearReminder: Bool = false,
-        priority: Priority? = nil,
+        important: Bool? = nil,
+        urgent: Bool? = nil,
         dueAt: Date? = nil,
         clearDue: Bool = false,
         description: String? = nil,
@@ -156,7 +159,8 @@ public final class TodoStore: ObservableObject {
                 if item.reminderAt != newReminder { item.reminderSentAt = nil }
                 item.reminderAt = newReminder
             }
-            if let priority { item.priority = priority }
+            if let important { item.important = important }
+            if let urgent { item.urgent = urgent }
             if dueAt != nil || clearDue { item.dueAt = clearDue ? nil : dueAt }
             if let description { item.description = description }
             if let normalizedGroup { item.group = normalizedGroup }
@@ -172,15 +176,21 @@ public final class TodoStore: ObservableObject {
         }
     }
 
-    public func listItems(includeCompleted: Bool = false, group: String? = nil, now: Date = Date()) throws -> [TodoItem] {
+    public func listItems(
+        includeCompleted: Bool = false,
+        group: String? = nil,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) throws -> [TodoItem] {
         let normalizedGroup = try group.map(TaskGroup.normalize)
-        let selected = includeCompleted ? items : openItems(now: now)
+        let selected = includeCompleted ? items : openItems(now: now, calendar: calendar)
         return selected.filter { normalizedGroup == nil || $0.group == normalizedGroup }
     }
 
-    public func openItems(now: Date = Date()) -> [TodoItem] {
-        items.filter { !$0.isCompleted }
-            .sorted { Self.isOrderedBefore($0, $1, now: now) }
+    public func openItems(now: Date = Date(), calendar: Calendar = .current) -> [TodoItem] {
+        let nextDayStart = calendar.ghostPinNextDayStart(after: now)
+        return items.filter { !$0.isCompleted }
+            .sorted { Self.isOrderedBefore($0, $1, nextDayStart: nextDayStart) }
     }
 
     public func hudItems(
@@ -235,11 +245,10 @@ public final class TodoStore: ObservableObject {
         calendar: Calendar = .current
     ) -> HudQuadrantProjection {
         let scoped = scopedOpenItems(scope: scope, now: now, calendar: calendar)
-        let dayStart = calendar.ghostPinDayStart(for: now)
-        let nextDayStart = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? now
+        let nextDayStart = calendar.ghostPinNextDayStart(after: now)
         var buckets: [HudQuadrant: [TodoItem]] = [:]
         for item in scoped {
-            let quadrant = HudQuadrant.classify(priority: item.priority, dueAt: item.dueAt, nextDayStart: nextDayStart)
+            let quadrant = HudQuadrant.classify(important: item.important, urgent: item.urgent, dueAt: item.dueAt, nextDayStart: nextDayStart)
             buckets[quadrant, default: []].append(item)
         }
         let cells = HudQuadrant.allCases.map { quadrant in
@@ -259,7 +268,7 @@ public final class TodoStore: ObservableObject {
 
     /// 应用显示范围后的未完成任务，沿用 `openItems` 的既有排序。
     private func scopedOpenItems(scope: HudScope, now: Date, calendar: Calendar) -> [TodoItem] {
-        let open = openItems(now: now)
+        let open = openItems(now: now, calendar: calendar)
         switch scope {
         case .all:
             return open
@@ -289,17 +298,14 @@ public final class TodoStore: ObservableObject {
         lhs.createdAt == rhs.createdAt ? lhs.id > rhs.id : lhs.createdAt > rhs.createdAt
     }
 
-    private static func isOrderedBefore(_ lhs: TodoItem, _ rhs: TodoItem, now: Date) -> Bool {
+    private static func isOrderedBefore(_ lhs: TodoItem, _ rhs: TodoItem, nextDayStart: Date) -> Bool {
         if lhs.status != rhs.status {
             return lhs.status == .doing
         }
-        let lhsOverdue = lhs.isOverdue(now: now)
-        let rhsOverdue = rhs.isOverdue(now: now)
-        if lhsOverdue != rhsOverdue {
-            return !lhsOverdue
-        }
-        if lhs.priority != rhs.priority {
-            return lhs.priority > rhs.priority
+        let lhsRank = HudQuadrant.classify(important: lhs.important, urgent: lhs.urgent, dueAt: lhs.dueAt, nextDayStart: nextDayStart).sortRank
+        let rhsRank = HudQuadrant.classify(important: rhs.important, urgent: rhs.urgent, dueAt: rhs.dueAt, nextDayStart: nextDayStart).sortRank
+        if lhsRank != rhsRank {
+            return lhsRank < rhsRank
         }
         switch (lhs.dueAt, rhs.dueAt) {
         case let (lhsDue?, rhsDue?):

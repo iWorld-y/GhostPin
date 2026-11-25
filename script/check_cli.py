@@ -12,6 +12,8 @@ from pathlib import Path
 
 from check_skill import skill_entries, validate_skill
 
+AXES = ("--important", "false", "--urgent", "false")
+
 
 def run(binary: Path, root: Path, *args: str, code: int = 0) -> object:
     """执行带 JSON 输出的命令并检查退出码。"""
@@ -37,16 +39,38 @@ def run(binary: Path, root: Path, *args: str, code: int = 0) -> object:
 def unchanged_failures(binary: Path, root: Path, task_file: Path) -> None:
     """非法参数或不存在的目标不得提交任务文件和备份。"""
     before = task_file.read_bytes()
-    backup = task_file.with_name("todos.v1.backup.json")
-    backup_before = backup.read_bytes() if backup.exists() else None
+    backups = [
+        task_file.with_name(f"todos.v{version}.backup.json") for version in (1, 2)
+    ]
+    backups_before = [path.read_bytes() if path.exists() else None for path in backups]
     failures: list[tuple[list[str], int]] = [
-        (["add", "缺组"], 2),
-        (["add", "空组", "--group", " \n "], 2),
+        (["add", "缺组", *AXES], 2),
+        (["add", "空组", "--group", " \n ", *AXES], 2),
         (["add", "缺值", "--group"], 2),
+        (["add", "缺少两项", "--group", "默认"], 2),
+        (["add", "缺重要度", "--group", "默认", "--urgent", "false"], 2),
+        (["add", "缺紧迫度", "--group", "默认", "--important", "true"], 2),
+        (
+            [
+                "add",
+                "非法重要度",
+                "--group",
+                "默认",
+                "--important",
+                "True",
+                "--urgent",
+                "false",
+            ],
+            2,
+        ),
+        (["add", "非法日期", "--group", "默认", *AXES, "--due", "不是日期"], 2),
         (["list", "--group", " "], 2),
+        (["update", "10000"], 2),
         (["update", "10000", "--group", ""], 2),
         (["update", "10000", "--due", "不是日期"], 2),
-        (["add", "非法优先级", "--group", "默认", "--priority", "urgent"], 2),
+        (["update", "10000", "--urgent", "1"], 2),
+        (["add", "旧参数", "--group", "默认", *AXES, "--priority", "high"], 2),
+        (["update", "10000", "--priority", "high"], 2),
         (["update", "99999", "--group", "项目"], 1),
         (["doing", "99999"], 1),
         (["delete", "99999"], 1),
@@ -63,7 +87,9 @@ def unchanged_failures(binary: Path, root: Path, task_file: Path) -> None:
     for args, code in failures:
         run(binary, root, *args, code=code)
         assert task_file.read_bytes() == before, args
-        assert (backup.read_bytes() if backup.exists() else None) == backup_before
+        assert [
+            path.read_bytes() if path.exists() else None for path in backups
+        ] == backups_before
 
 
 def check_help(binary: Path, root: Path) -> None:
@@ -97,6 +123,15 @@ def check_help(binary: Path, root: Path) -> None:
             assert "ghostpin-cli" in result.stdout
             if command is None:
                 assert "ghostpin-cli init [--json]" in result.stdout
+            if command in ("add", "update"):
+                assert "--important <true|false>" in result.stdout
+                assert "--urgent <true|false>" in result.stdout
+                assert "--priority" not in result.stdout
+            if command == "add":
+                assert (
+                    "--group <组名> --important <true|false> --urgent <true|false>"
+                    in result.stdout
+                )
             assert not root.exists(), args
 
 
@@ -234,6 +269,90 @@ def check_init(binary: Path, root: Path, source: Path) -> None:
     print("PASS init 隔离检查：来源定位、帮助、参数、完整替换、链接、归属和任务隔离")
 
 
+def check_task_payload(item: dict[str, object]) -> None:
+    """核对任务 JSON 的字段和布尔类型。"""
+    assert set(item) == {
+        "id",
+        "group",
+        "title",
+        "createdAt",
+        "status",
+        "completedAt",
+        "reminderAt",
+        "reminderSentAt",
+        "important",
+        "urgent",
+        "dueAt",
+        "description",
+        "isCompleted",
+    }
+    assert type(item["id"]) is int
+    assert type(item["important"]) is bool and type(item["urgent"]) is bool
+
+
+def check_v2_migration(binary: Path, root: Path, fixture: Path) -> None:
+    """验证 v2 查询迁移、备份和字段保留。"""
+    task_file = root / "GhostPin/todos.json"
+    task_file.parent.mkdir(parents=True)
+    original = fixture.read_bytes()
+    task_file.write_bytes(original)
+    unchanged_failures(binary, root, task_file)
+    items = run(binary, root, "list", "--all")
+    assert isinstance(items, list) and len(items) == 3
+    for item in items:
+        check_task_payload(item)
+        assert item["important"] is (item["id"] == 10002)
+        assert item["urgent"] is False
+    backup = task_file.with_name("todos.v2.backup.json")
+    assert backup.read_bytes() == original
+    assert not task_file.with_name("todos.v1.backup.json").exists()
+    document = json.loads(task_file.read_text())
+    expected = json.loads(original)
+    expected["schemaVersion"] = 3
+    for item in expected["items"]:
+        item["important"] = item.pop("priority") == "high"
+        item["urgent"] = False
+    assert document == expected
+    migrated_bytes = task_file.read_bytes()
+    assert run(binary, root, "list", "--all") == items
+    assert task_file.read_bytes() == migrated_bytes and backup.read_bytes() == original
+    print("PASS CLI v2 迁移：保留字段和下一编号，备份逐字节一致")
+
+
+def check_list_quadrant_order(binary: Path, root: Path) -> None:
+    """用 CLI 验证 Doing 优先、四象限顺序与分组筛选。"""
+    for title, group, important, urgent in (
+        ("Q3", "项目", "false", "true"),
+        ("Q2", "项目", "true", "false"),
+        ("Q1", "项目", "true", "true"),
+        ("Q4", "其它", "false", "false"),
+        ("Doing", "项目", "false", "false"),
+    ):
+        result = run(
+            binary,
+            root,
+            "add",
+            title,
+            "--group",
+            group,
+            "--important",
+            important,
+            "--urgent",
+            urgent,
+        )
+        assert isinstance(result, dict)
+        if title == "Doing":
+            run(binary, root, "doing", str(result["item"]["id"]))
+    items = run(binary, root, "list")
+    assert isinstance(items, list)
+    assert [item["title"] for item in items] == ["Doing", "Q1", "Q2", "Q3", "Q4"]
+    grouped = run(binary, root, "list", "--group", "项目")
+    assert grouped == items[:-1]
+    all_items = run(binary, root, "list", "--all")
+    assert isinstance(all_items, list)
+    assert [item["title"] for item in all_items] == ["Doing", "Q4", "Q1", "Q2", "Q3"]
+
+
 def main() -> None:
     """验证迁移、组别、整数 ID、并发和失败保护。"""
     repository = Path(__file__).resolve().parents[1]
@@ -242,26 +361,43 @@ def main() -> None:
         root = Path(temporary)
         check_help(binary, root / "help-must-not-exist")
         check_init(binary, root / "init-check", repository / "skills/ghostpin-cli")
+        fixtures = repository / "windows-native/tests/fixtures"
+        check_v2_migration(binary, root / "v2-check", fixtures / "tasks-groups-v2.json")
+        check_list_quadrant_order(binary, root / "sort-check")
         assert run(binary, root, "list") == []
         task_file = root / "GhostPin/todos.json"
         assert not task_file.exists()
-        legacy = repository / "windows-native/tests/fixtures/tasks-groups-legacy.json"
+        legacy = fixtures / "tasks-groups-legacy.json"
         task_file.write_bytes(legacy.read_bytes())
         unchanged_failures(binary, root, task_file)
         migrated = run(binary, root, "list", "--all")
         assert isinstance(migrated, list) and len(migrated) == 3
         assert {item["id"] for item in migrated} == {10000, 10001, 10002}
         assert {item["group"] for item in migrated} == {"默认"}
+        for item in migrated:
+            check_task_payload(item)
+            assert item["important"] is (item["id"] == 10002)
+            assert item["urgent"] is False
+        assert json.loads(task_file.read_text())["schemaVersion"] == 3
+        assert not task_file.with_name("todos.v2.backup.json").exists()
         assert (
             task_file.with_name("todos.v1.backup.json").read_bytes()
             == legacy.read_bytes()
         )
 
         created = run(
-            binary, root, "add", "长组任务", "--group", "  完整项目名称 Project  "
+            binary,
+            root,
+            "add",
+            "长组任务",
+            "--group",
+            "  完整项目名称 Project  ",
+            *AXES,
         )
         assert isinstance(created, dict) and created["ok"] is True
         item = created["item"]
+        check_task_payload(item)
+        assert item["important"] is False and item["urgent"] is False
         assert item["id"] == 10003 and item["group"] == "完整项目名称 Project"
         assert run(binary, root, "list", "--group", "完整项目名称 Project") == [item]
         assert run(binary, root, "list", "--group", "完整项目名称 project") == []
@@ -274,17 +410,21 @@ def main() -> None:
             "2027-01-01T09:00:00+08:00",
             "--due",
             "2027-01-02T18:00:00+08:00",
-            "--priority",
-            "high",
+            "--important",
+            "true",
             "--description",
             "保留详情",
         )
+        urgent = run(binary, root, "update", "10003", "--urgent", "true")
+        assert isinstance(urgent, dict) and urgent["item"]["important"] is True
+        assert urgent["item"]["urgent"] is True
         renamed = run(binary, root, "update", "10003", "--title", "临时新标题")
         assert isinstance(fields, dict) and isinstance(renamed, dict)
         assert renamed["item"]["reminderAt"] == fields["item"]["reminderAt"]
         assert renamed["item"]["dueAt"] == fields["item"]["dueAt"]
         assert (
-            renamed["item"]["priority"] == "high"
+            renamed["item"]["important"] is True
+            and renamed["item"]["urgent"] is True
             and renamed["item"]["description"] == "保留详情"
         )
         cleared = run(
@@ -343,7 +483,7 @@ def main() -> None:
                 assert time.monotonic() < deadline, "App 工作进程未就绪"
                 time.sleep(0.01)
             run(binary, root, "update", "10003", "--group", "App 外部新组")
-            run(binary, root, "add", "外部新增", "--group", "另一组")
+            run(binary, root, "add", "外部新增", "--group", "另一组", *AXES)
             (task_file.parent / "go").touch()
             stdout, stderr = worker.communicate(timeout=15)
             assert worker.returncode == 0, (stdout, stderr)
@@ -385,7 +525,15 @@ def main() -> None:
 
         processes: list[subprocess.Popen[str]] = [
             subprocess.Popen(
-                [str(binary), "add", f"并发 {index}", "--group", "并发", "--json"],
+                [
+                    str(binary),
+                    "add",
+                    f"并发 {index}",
+                    "--group",
+                    "并发",
+                    *AXES,
+                    "--json",
+                ],
                 env={**os.environ, "GHOSTPIN_TEST_SUPPORT_ROOT": str(root)},
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -416,10 +564,10 @@ def main() -> None:
                 deleted = run(binary, root, "delete", str(item["id"]))
                 assert deleted == {"ok": True, "id": item["id"]}
         assert run(binary, root, "list", "--all") == []
-        continued = run(binary, root, "add", "清空后继续", "--group", "默认")
+        continued = run(binary, root, "add", "清空后继续", "--group", "默认", *AXES)
         assert isinstance(continued, dict) and continued["item"]["id"] == 10013
         document = json.loads(task_file.read_text())
-        assert document["nextID"] == 10014 and document["schemaVersion"] == 2
+        assert document["nextID"] == 10014 and document["schemaVersion"] == 3
         # 在同一隔离目录恢复原始备份并重新迁移，验证恢复字节及映射。
         current = task_file.read_bytes()
         task_file.write_bytes(task_file.with_name("todos.v1.backup.json").read_bytes())

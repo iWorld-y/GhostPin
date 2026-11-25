@@ -19,7 +19,7 @@ User ──natural language──▶ Agent ──ghostpin-cli──▶ todos.jso
                                         ghost HUD / notifications / menu bar
 ```
 
-- **Writes go through the CLI**: the only UI write action is completing a task on the HUD; creation, editing, deletion, status, priority, due date, and description changes use the CLI.
+- **Writes go through the CLI**: the only UI write action is completing a task on the HUD; creation, editing, deletion, status, importance, urgency, due date, and description changes use the CLI.
 - **Agents provide absolute time**: reminders and due dates use timezone-aware ISO8601 values; the app does not parse natural-language time.
 - **Optional global shortcut (off by default)**: no global shortcut is registered by default; you can record one in Settings → Advanced to toggle passthrough/interactive HUD mode. System-shortcut conflicts are pre-checked and failed registrations are rejected; conflicts with third-party apps cannot be fully detected.
 - **Live refresh**: CLI changes appear on the HUD within seconds without restarting the app.
@@ -27,7 +27,7 @@ User ──natural language──▶ Agent ──ghostpin-cli──▶ todos.jso
 ## Features
 
 - Desktop ghost HUD: borderless, always-on-top, adjustable opacity, click-through by default, with persisted position, size, opacity, mode, and scope. In interactive mode you can pick the single-column list or the four-quadrant view; switching back to passthrough collapses the HUD to the compact list, and re-entering interactive mode restores your last choice. The view preference survives restarts and defaults to the list on first use. When collapsing from quadrants to the list (clicking the list view in interactive mode or switching to passthrough), the list snaps horizontally to the nearer left or right edge of the current screen's visible area to stay out of the way; re-entering interactive mode restores the pre-collapse quadrant position.
-- A unified HUD across groups: title, priority, group, due date, description, and overdue styling. Priority and group badges align to the right of the title row. Group text is limited to the width of three Chinese characters, with a trailing ellipsis; the only write interaction advances task status. The quadrant view classifies every open task in scope by priority and due date: high priority is important, medium/low is general; overdue or due today is urgent. The four cells are 优先处理 (Do First), 安排时间 (Schedule), 及时处理 (Handle Soon), and 稍后处理 (Later), each with its own count and independent scrolling, Doing before Todo. The list keeps its item limit and Doing focus.
+- The HUD shows tasks across all groups, including titles, due dates, descriptions, and overdue styling. It shows the effective quadrant and group on the right of the title row. Group names longer than three Chinese characters in width end with an ellipsis. The quadrant view uses importance and urgency, and treats overdue tasks and tasks due today as urgent. Each cell has an independent count and scroll position. The list orders Doing before Todo and sorts each section by quadrant while keeping its item limit and Doing focus.
 - Menu bar tray: open-task badge, show/hide HUD, interactive mode, settings, and quit; settings include a HUD tab and an Advanced tab (optional global shortcut).
 - Local macOS notifications for reminders, with launch-at-login support.
 - ghostpin-cli for listing, creating, status changes, updates, deletion, JSON output, and command-level help.
@@ -41,7 +41,7 @@ GhostPin is local-first.
 - Preferences use macOS UserDefaults.
 - The app does not access the network at runtime.
 
-Tasks use a document containing `schemaVersion: 2`, `nextID`, and `items`. Integer IDs start at `10000`, share one sequence across groups, and are never reused after deletion. The first successful access migrates all legacy UUID tasks to the built-in `默认` group, preserving the original bytes in `todos.v1.backup.json` beside the task file. If the GhostPin file is absent, migration can read the old `TodoPin/todos.json` without changing that source.
+On macOS, the task document contains `schemaVersion: 3`, `nextID`, and `items`. IDs start at `10000`, share one sequence across groups, and are never reused after deletion. The first successful access migrates v2 documents and legacy UUID arrays and keeps a copy of the original bytes.
 
 Quit old app and CLI processes before upgrading, and update the app and bundled CLI together. Old programs cannot read the new document; UUIDs are no longer accepted as task IDs. A rollback restores only the migration-time snapshot, so preserve later changes separately. See [task storage and migration](docs/task-storage.md).
 
@@ -91,8 +91,8 @@ Common commands:
 # Query a group; --all can be combined with --group
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli list --group GhostPin --json
 
-# Create a task with an explicit group
-/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli add "Prepare report" --group 默认 --priority medium --due "2026-08-20T18:00:00+08:00" --description "Summarize weekly data" --json
+# Create a task with an explicit group, importance, and urgency
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli add "Prepare report" --group 默认 --important false --urgent false --due "2026-08-20T18:00:00+08:00" --description "Summarize weekly data" --json
 
 # Change status
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli doing <id> --json
@@ -101,7 +101,7 @@ Common commands:
 
 # Update task fields
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --group GhostPin --json
-/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --title "Prepare and send report" --priority high --due "2026-08-21T18:00:00+08:00" --description "Send to the team" --json
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --title "Prepare and send report" --important true --urgent false --due "2026-08-21T18:00:00+08:00" --description "Send to the team" --json
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --clear-due --json
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --clear-reminder --json
 
@@ -109,7 +109,7 @@ Common commands:
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli delete <id> --json
 ```
 
-Use a decimal integer `<id>` from an actual query result. Each task has one group. Group names are trimmed and matched exactly, including case. Every creation requires `--group`, including when choosing `默认`. Full group names are retained in data and CLI output. Reminders and due dates must be timezone-aware ISO8601 values. A non-zero exit code means the command failed.
+Use a decimal integer `<id>` from an actual query result. Each task has one group. Group names are trimmed and matched exactly, including case. Every new task requires `--group`, `--important`, and `--urgent`. The built-in `默认` group is available. Full group names are retained in data and CLI output. Reminders and due dates must be timezone-aware ISO8601 values. A non-zero exit code means the command failed.
 
 ## Build from source
 

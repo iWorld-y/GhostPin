@@ -1,15 +1,19 @@
 import Foundation
 
-/// 只解析历史 UUID 任务；新任务不使用旧格式的默认值。
-struct LegacyTodoItem: Decodable {
-    let id: UUID
+private enum LegacyPriority: String, Decodable {
+    case high, medium, low
+}
+
+/// 解码 v1 与 v2 任务共用的历史字段。
+struct LegacyTodoItem<ID: Decodable>: Decodable {
+    let id: ID
     let title: String
     let createdAt: Date
     let status: TodoStatus
     let completedAt: Date?
     let reminderAt: Date?
     let reminderSentAt: Date?
-    let priority: Priority
+    private let priority: LegacyPriority?
     let dueAt: Date?
     let description: String?
 
@@ -20,7 +24,7 @@ struct LegacyTodoItem: Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
+        id = try container.decode(ID.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
@@ -28,24 +32,49 @@ struct LegacyTodoItem: Decodable {
             ?? (completedAt == nil ? .todo : .done)
         reminderAt = try container.decodeIfPresent(Date.self, forKey: .reminderAt)
         reminderSentAt = try container.decodeIfPresent(Date.self, forKey: .reminderSentAt)
-        priority = try container.decodeIfPresent(Priority.self, forKey: .priority) ?? .medium
+        priority = try container.decodeIfPresent(LegacyPriority.self, forKey: .priority)
         dueAt = try container.decodeIfPresent(Date.self, forKey: .dueAt)
         description = try container.decodeIfPresent(String.self, forKey: .description)
     }
 
-    func migrated(id: Int64) -> TodoItem {
+    func migrated(id: Int64, group: String) -> TodoItem {
         TodoItem(
             id: id,
-            group: TaskGroup.defaultName,
+            group: group,
             title: title,
+            important: priority == .high,
+            urgent: false,
             createdAt: createdAt,
             status: status,
             completedAt: completedAt,
             reminderAt: reminderAt,
             reminderSentAt: reminderSentAt,
-            priority: priority,
             dueAt: dueAt,
             description: description
         )
+    }
+}
+
+struct LegacyV2TaskDocument: Decodable {
+    let nextID: Int64
+    let items: [LegacyV2TodoItem]
+
+    func migrated() -> TaskDocument {
+        TaskDocument(nextID: nextID, items: items.map(\.item))
+    }
+}
+
+struct LegacyV2TodoItem: Decodable {
+    let item: TodoItem
+
+    private enum CodingKeys: CodingKey {
+        case group
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let group = try container.decode(String.self, forKey: .group)
+        let legacy = try LegacyTodoItem<Int64>(from: decoder)
+        item = legacy.migrated(id: legacy.id, group: group)
     }
 }

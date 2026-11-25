@@ -24,9 +24,10 @@ struct DesktopNotesBoardView: View {
 
     var body: some View {
         let view = appState.preferences.effectiveHudView
+        let now = Date()
         // 仅计算当前视图所需的投影，避免每次 body 都排序两份。
-        let listProjection: HudProjection? = view == .list ? projection : nil
-        let quadrantProjection: HudQuadrantProjection? = view == .quadrants ? quadrantProjection : nil
+        let listProjection: HudProjection? = view == .list ? projectList(now: now) : nil
+        let quadrantProjection: HudQuadrantProjection? = view == .quadrants ? projectQuadrants(now: now) : nil
         let isEmpty = listProjection.map { $0.doing.isEmpty && $0.todo.isEmpty } ?? false
         let doingCount = quadrantProjection?.doingCount ?? listProjection?.doingCount ?? 0
         let todoCount = quadrantProjection?.todoCount ?? listProjection?.todoCount ?? 0
@@ -47,6 +48,7 @@ struct DesktopNotesBoardView: View {
                     view,
                     listProjection: listProjection,
                     quadrantProjection: quadrantProjection,
+                    now: now,
                     availableHeight: geometry.size.height - Self.headerHeight - Self.footerHeight - (isInteractive ? Self.toolbarHeight : 0)
                 )
 
@@ -94,15 +96,16 @@ struct DesktopNotesBoardView: View {
         _ view: HudView,
         listProjection: HudProjection?,
         quadrantProjection: HudQuadrantProjection?,
+        now: Date,
         availableHeight: CGFloat
     ) -> some View {
         if view == .quadrants, let quadrantProjection {
-            quadrantGrid(quadrantProjection, height: max(0, availableHeight))
+            quadrantGrid(quadrantProjection, now: now, height: max(0, availableHeight))
         } else if let listProjection {
             if listProjection.doing.isEmpty && listProjection.todo.isEmpty {
                 emptyState
             } else {
-                taskList(listProjection, availableHeight: availableHeight)
+                taskList(listProjection, now: now, availableHeight: availableHeight)
             }
         }
     }
@@ -168,20 +171,20 @@ struct DesktopNotesBoardView: View {
         )
     }
 
-    private func quadrantGrid(_ projection: HudQuadrantProjection, height: CGFloat) -> some View {
+    private func quadrantGrid(_ projection: HudQuadrantProjection, now: Date, height: CGFloat) -> some View {
         let cellHeight = max(0, (height - 0.5) / 2)
         return VStack(spacing: 0) {
             HStack(spacing: 0) {
-                quadrantCell(projection.cell(.importantUrgent))
+                quadrantCell(projection.cell(.importantUrgent), now: now)
                 quadrantSeparator(width: 0.5)
-                quadrantCell(projection.cell(.importantNotUrgent))
+                quadrantCell(projection.cell(.importantNotUrgent), now: now)
             }
             .frame(height: cellHeight)
             quadrantSeparator(height: 0.5)
             HStack(spacing: 0) {
-                quadrantCell(projection.cell(.generalUrgent))
+                quadrantCell(projection.cell(.generalUrgent), now: now)
                 quadrantSeparator(width: 0.5)
-                quadrantCell(projection.cell(.generalNotUrgent))
+                quadrantCell(projection.cell(.generalNotUrgent), now: now)
             }
             .frame(height: cellHeight)
         }
@@ -196,7 +199,7 @@ struct DesktopNotesBoardView: View {
             .accessibilityHidden(true)
     }
 
-    private func quadrantCell(_ cell: HudQuadrantCell) -> some View {
+    private func quadrantCell(_ cell: HudQuadrantCell, now: Date) -> some View {
         VStack(spacing: 0) {
             quadrantHeading(cell)
             if cell.count == 0 {
@@ -205,10 +208,10 @@ struct DesktopNotesBoardView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                         if !cell.doing.isEmpty {
-                            taskSection("Doing", items: cell.doing, count: cell.doing.count, isDoing: true)
+                            taskSection("Doing", items: cell.doing, count: cell.doing.count, isDoing: true, now: now, quadrant: cell.quadrant)
                         }
                         if !cell.todo.isEmpty {
-                            taskSection("Todo", items: cell.todo, count: cell.todo.count, isDoing: false)
+                            taskSection("Todo", items: cell.todo, count: cell.todo.count, isDoing: false, now: now, quadrant: cell.quadrant)
                         }
                     }
                     .padding(.bottom, 6)
@@ -310,16 +313,16 @@ struct DesktopNotesBoardView: View {
         .padding(.horizontal, 12)
     }
 
-    private func taskList(_ projection: HudProjection, availableHeight: CGFloat) -> some View {
+    private func taskList(_ projection: HudProjection, now: Date, availableHeight: CGFloat) -> some View {
         let viewportHeight = min(contentHeight, Self.maximumBodyHeight, max(0, availableHeight))
 
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 if !projection.doing.isEmpty {
-                    taskSection("Doing", items: projection.doing, count: projection.doingCount, isDoing: true)
+                    taskSection("Doing", items: projection.doing, count: projection.doingCount, isDoing: true, now: now)
                 }
                 if !projection.todo.isEmpty {
-                    taskSection("Todo", items: projection.todo, count: projection.todoCount, isDoing: false)
+                    taskSection("Todo", items: projection.todo, count: projection.todoCount, isDoing: false, now: now)
                 }
             }
             .padding(.bottom, 6)
@@ -350,10 +353,23 @@ struct DesktopNotesBoardView: View {
         }
     }
 
-    private func taskSection(_ title: String, items: [TodoItem], count: Int, isDoing: Bool) -> some View {
-        Section {
+    private func taskSection(
+        _ title: String,
+        items: [TodoItem],
+        count: Int,
+        isDoing: Bool,
+        now: Date,
+        quadrant: HudQuadrant? = nil
+    ) -> some View {
+        let nextDayStart = Calendar.current.ghostPinNextDayStart(after: now)
+        return Section {
             ForEach(items) { item in
-                DesktopNoteRowView(item: item, isInteractive: isInteractive) {
+                let effectiveQuadrant = quadrant ?? HudQuadrant.classify(
+                    important: item.important, urgent: item.urgent, dueAt: item.dueAt, nextDayStart: nextDayStart
+                )
+                DesktopNoteRowView(
+                    item: item, quadrant: effectiveQuadrant, isOverdue: item.isOverdue(now: now), isInteractive: isInteractive
+                ) {
                     appState.advanceStatus(item)
                 }
                 // 状态变化时重建行，避免跨分区移动后复用旧图标和动作说明。
@@ -428,7 +444,7 @@ struct DesktopNotesBoardView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("没有未完成待办")
                 .font(.system(size: 12.5, weight: .medium))
-            Text("ghostpin-cli add \"写周报\" --group 默认")
+            Text("ghostpin-cli add --help")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -439,16 +455,17 @@ struct DesktopNotesBoardView: View {
         .frame(height: Self.emptyBodyHeight)
     }
 
-    private var projection: HudProjection {
+    private func projectList(now: Date) -> HudProjection {
         appState.todoStore.hudProjection(
             scope: appState.preferences.hudScope,
             maxCount: appState.preferences.hudMaxItems,
-            focusDoing: appState.preferences.hudFocusDoing
+            focusDoing: appState.preferences.hudFocusDoing,
+            now: now
         )
     }
 
-    private var quadrantProjection: HudQuadrantProjection {
-        appState.todoStore.hudQuadrantProjection(scope: appState.preferences.hudScope)
+    private func projectQuadrants(now: Date) -> HudQuadrantProjection {
+        appState.todoStore.hudQuadrantProjection(scope: appState.preferences.hudScope, now: now)
     }
 
     private var isInteractive: Bool {
@@ -471,6 +488,8 @@ private struct HUDContentHeightKey: PreferenceKey {
 
 private struct DesktopNoteRowView: View {
     let item: TodoItem
+    let quadrant: HudQuadrant
+    let isOverdue: Bool
     let isInteractive: Bool
     let onAdvanceStatus: () -> Void
 
@@ -511,7 +530,7 @@ private struct DesktopNoteRowView: View {
                 Text(item.title)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.primary)
-                    .strikethrough(item.isOverdue(), color: .red)
+                    .strikethrough(isOverdue, color: .red)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -526,9 +545,11 @@ private struct DesktopNoteRowView: View {
 
             VStack(alignment: .trailing, spacing: 2) {
                 HStack(spacing: 4) {
-                    Text(priorityLabel)
-                        .font(.system(size: 10, weight: item.priority == .low ? .regular : .semibold))
-                        .foregroundStyle(priorityColor)
+                    Text(quadrantLabel)
+                        .font(.system(size: 10, weight: quadrant == .generalNotUrgent ? .regular : .semibold))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(quadrantColor)
 
                     Text(item.group)
                         .font(.system(size: 10, weight: .semibold))
@@ -544,7 +565,7 @@ private struct DesktopNoteRowView: View {
                 if let dueAt = item.dueAt {
                     Text(Self.dueFormatter.string(from: dueAt))
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(item.isOverdue() ? .red : .secondary)
+                        .foregroundStyle(isOverdue ? .red : .secondary)
                         .lineLimit(1)
                 }
             }
@@ -562,25 +583,21 @@ private struct DesktopNoteRowView: View {
         withAttributes: [.font: NSFont.systemFont(ofSize: 10, weight: .semibold)]
     ).width
 
-    private var priorityLabel: String {
-        switch item.priority {
-        case .high:
-            return "高"
-        case .medium:
-            return "中"
-        case .low:
-            return "低"
+    private var quadrantLabel: String {
+        switch quadrant {
+        case .importantUrgent: return "急重"
+        case .importantNotUrgent: return "重要"
+        case .generalUrgent: return "紧急"
+        case .generalNotUrgent: return "稍后"
         }
     }
 
-    private var priorityColor: Color {
-        switch item.priority {
-        case .high:
-            return .red
-        case .medium:
-            return .primary.opacity(0.74)
-        case .low:
-            return .secondary
+    private var quadrantColor: Color {
+        switch quadrant {
+        case .importantUrgent: return .red
+        case .importantNotUrgent: return .primary.opacity(0.84)
+        case .generalUrgent: return .orange
+        case .generalNotUrgent: return .secondary
         }
     }
 

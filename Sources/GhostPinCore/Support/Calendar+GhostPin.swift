@@ -5,6 +5,10 @@ extension Calendar {
         startOfDay(for: date)
     }
 
+    public func ghostPinNextDayStart(after date: Date) -> Date {
+        dateInterval(of: .day, for: date)?.end ?? date
+    }
+
     public func ghostPinDayEnd(for date: Date) -> Date {
         let start = startOfDay(for: date)
         return self.date(byAdding: DateComponents(day: 1, second: -1), to: start) ?? date

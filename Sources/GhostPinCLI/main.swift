@@ -147,7 +147,7 @@ private func runAdd(_ arguments: [String]) throws {
     }
     let parsed = try parseArguments(
         arguments,
-        valueFlags: ["--group", "--reminder", "--priority", "--due", "--description"],
+        valueFlags: ["--group", "--reminder", "--important", "--urgent", "--due", "--description"],
         booleanFlags: ["--json"]
     )
     guard !parsed.positionals.isEmpty else {
@@ -165,7 +165,11 @@ private func runAdd(_ arguments: [String]) throws {
     if let raw = parsed.values["--reminder"] {
         reminderAt = try parseReminder(raw)
     }
-    let priority = try parsePriority(parsed.values["--priority"])
+    guard let importantValue = parsed.values["--important"], let urgentValue = parsed.values["--urgent"] else {
+        throw CLIError(message: "新增任务必须指定 --important <true|false> 与 --urgent <true|false>", code: .usageError)
+    }
+    let important = try parseBoolean(importantValue, flag: "--important")
+    let urgent = try parseBoolean(urgentValue, flag: "--urgent")
     let dueAt = try parseDueDate(parsed.values["--due"])
     let description = parsed.values["--description"]
 
@@ -173,8 +177,9 @@ private func runAdd(_ arguments: [String]) throws {
     guard let item = try store.add(
         title: title,
         group: group,
+        important: important,
+        urgent: urgent,
         reminderAt: reminderAt,
-        priority: priority,
         dueAt: dueAt,
         description: description
     ) else {
@@ -208,22 +213,16 @@ private func runUpdate(_ arguments: [String]) throws {
     }
     let parsed = try parseArguments(
         arguments,
-        valueFlags: ["--title", "--group", "--reminder", "--priority", "--due", "--description"],
+        valueFlags: ["--title", "--group", "--reminder", "--important", "--urgent", "--due", "--description"],
         booleanFlags: ["--json", "--clear-reminder", "--clear-due"]
     )
     guard parsed.positionals.count == 1, let idString = parsed.positionals.first else {
         throw CLIError(message: "用法: \(usageText(for: "update"))", code: .usageError)
     }
 
-    let hasTitle = parsed.values["--title"] != nil
-    let hasReminder = parsed.values["--reminder"] != nil
     let clearsReminder = parsed.flags.contains("--clear-reminder")
-    let hasPriority = parsed.values["--priority"] != nil
-    let hasDue = parsed.values["--due"] != nil
     let clearsDue = parsed.flags.contains("--clear-due")
-    let hasDescription = parsed.values["--description"] != nil
-    let hasGroup = parsed.values["--group"] != nil
-    guard hasTitle || hasReminder || clearsReminder || hasPriority || hasDue || clearsDue || hasDescription || hasGroup else {
+    guard !parsed.values.isEmpty || clearsReminder || clearsDue else {
         throw CLIError(message: "update 至少需要指定一项修改参数", code: .usageError)
     }
 
@@ -234,7 +233,8 @@ private func runUpdate(_ arguments: [String]) throws {
         }
     }
     let reminderAt = try parsed.values["--reminder"].map(parseReminder)
-    let priority = try parsed.values["--priority"].map { try parsePriority($0) }
+    let important = try parsed.values["--important"].map { try parseBoolean($0, flag: "--important") }
+    let urgent = try parsed.values["--urgent"].map { try parseBoolean($0, flag: "--urgent") }
     let dueAt = try parseDueDate(parsed.values["--due"])
     let group = try parseGroup(parsed.values["--group"])
     let store = try makeStore()
@@ -243,7 +243,8 @@ private func runUpdate(_ arguments: [String]) throws {
         title: parsed.values["--title"],
         reminderAt: reminderAt,
         clearReminder: clearsReminder,
-        priority: priority,
+        important: important,
+        urgent: urgent,
         dueAt: dueAt,
         clearDue: clearsDue,
         description: parsed.values["--description"],
@@ -372,14 +373,13 @@ private func parseDueDate(_ raw: String?) throws -> Date? {
     return date
 }
 
-private func parsePriority(_ raw: String?) throws -> Priority {
-    guard let raw else {
-        return .medium
+private func parseBoolean(_ raw: String, flag: String) throws -> Bool {
+    switch raw {
+    case "true": return true
+    case "false": return false
+    default:
+        throw CLIError(message: "\(flag) 仅接受 true 或 false", code: .usageError)
     }
-    guard let priority = Priority(rawValue: raw) else {
-        throw CLIError(message: "无效的优先级: \(raw)（可选 high、medium、low）", code: .usageError)
-    }
-    return priority
 }
 
 private func successOutput(_ item: TodoItem) throws {
@@ -405,11 +405,11 @@ private func usageText(for command: String) -> String {
     case "list":
         return "ghostpin-cli list [--group <组名>] [--all] [--json]"
     case "add":
-        return "ghostpin-cli add <标题> --group <组名> [--reminder <ISO8601>] [--priority <high|medium|low>] [--due <ISO8601>] [--description <描述>]"
+        return "ghostpin-cli add <标题> --group <组名> --important <true|false> --urgent <true|false> [--reminder <ISO8601>] [--due <ISO8601>] [--description <描述>]"
     case "doing", "done", "undone", "delete":
         return "ghostpin-cli \(command) <id>"
     case "update":
-        return "ghostpin-cli update <id> [--group <组名>] [--title <标题>] [--reminder <ISO8601>] [--clear-reminder] [--priority <high|medium|low>] [--due <ISO8601>] [--clear-due] [--description <描述>]"
+        return "ghostpin-cli update <id> [--group <组名>] [--title <标题>] [--reminder <ISO8601>] [--clear-reminder] [--important <true|false>] [--urgent <true|false>] [--due <ISO8601>] [--clear-due] [--description <描述>]"
     case "version":
         return "ghostpin-cli version"
     default:
@@ -431,30 +431,31 @@ private func printCommandHelp(_ command: String) {
         print("""
         \(usageText(for: "list"))
           列出任务；默认只显示未完成任务，--all 包含已完成任务。
-          --group 按完整组名精确查询，不指定则显示所有组。
+          --group 按完整组名精确查询，可与 --all 和 --json 组合。
         """)
     case "add":
         print("""
         \(usageText(for: "add"))
           新增任务，必须显式指定组名，可使用内置组“默认”。组名区分大小写。
-          日期必须使用 ISO8601，优先级默认为 medium。
+          必须显式指定 --important 与 --urgent，两者仅接受 true 或 false。日期必须使用 ISO8601。
         """)
     case "doing", "done", "undone":
         print("""
         \(usageText(for: command))
-          将指定任务标记为对应状态。
+          将指定任务标记为对应状态。任务 ID 为从 10000 开始的整数。
         """)
     case "update":
         print("""
         \(usageText(for: "update"))
-          修改任务；至少指定一项参数，未指定的字段保持不变。
+          修改任务。至少指定一项参数，未指定的字段保持不变。任务 ID 为从 10000 开始的整数。
+          --important 与 --urgent 仅接受 true 或 false。
           --clear-reminder 清除提醒时间，--clear-due 清除截止时间。
           --group 将任务移到指定组，任务 ID 保持不变。
         """)
     case "delete":
         print("""
         \(usageText(for: "delete"))
-          删除指定任务。
+          删除指定任务。任务 ID 为从 10000 开始的整数。
         """)
     case "version":
         print("""

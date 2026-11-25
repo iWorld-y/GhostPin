@@ -19,7 +19,7 @@ GhostPin 是 Agent 的本地任务面板。Agent 通过命令行读取和修改�
                                       幽灵 HUD / 本地通知 / 菜单栏托盘
 ```
 
-- **写操作通过 CLI**：UI 上唯一的写入口是 HUD 上的「勾选完成」；新增、编辑、删除、状态、优先级、截止日期和描述通过 CLI 完成。
+- **写操作通过 CLI**：UI 上唯一的写入口是 HUD 上的「勾选完成」；新增、编辑、删除、状态、重要度与紧迫度、截止日期和描述通过 CLI 完成。
 - **时间由 Agent 转换**：提醒时间和截止日期使用带时区的 ISO8601，应用不解析自然语言时间。
 - **全局快捷键可选（默认关闭）**：默认不注册全局快捷键；可在设置「高级」页为穿透/交互切换录制一个全局快捷键。保存前做系统快捷键预检，注册失败会阻止保存；第三方软件的快捷键冲突无法完全自动检测。
 - **文件监听实时刷新**：CLI 修改后，HUD 在数秒内自动刷新，无需重启 App。
@@ -27,7 +27,7 @@ GhostPin 是 Agent 的本地任务面板。Agent 通过命令行读取和修改�
 ## 功能
 
 - 桌面幽灵 HUD：无边框、始终置顶、透明度可调，默认鼠标点击穿透；窗口位置、尺寸、透明度、模式与显示范围重启后自动恢复。交互模式可在「单列」和「四象限」之间选择；切回穿透模式时自动收为紧凑列表，再进入交互模式恢复上次选择，视图偏好跨重启保存，首次默认单列。从四象限收为列表时（交互点「单列」或切回穿透），列表会自动水平贴到当前屏幕可用区较近的左或右侧边以减少遮挡；再次进入交互恢复四象限时还原收起前的位置。
-- HUD 统一展示所有组的任务：标题、优先级、组别、截止日期、描述、过期删除线；唯一交互是状态推进。优先级和组别标记在标题行右对齐，组名最多显示三个汉字的文本宽度，超出部分尾部省略。四象限按优先级与截止时间自动分类范围内全部未完成任务：高优先级为重要，中、低为一般；已逾期或今天到期为紧急。四格依次为「优先处理」「安排时间」「及时处理」「稍后处理」，各自显示计数并独立滚动，Doing 排在 Todo 前面；单列沿用条数上限与 Doing 聚焦。
+- HUD 统一展示所有组的任务，包括标题、截止日期、描述和逾期标记。HUD 在标题行右侧显示有效象限和组别，组名最多显示三个汉字的宽度，超出部分尾部省略。四象限按重要度和紧迫度分类，已逾期或本地当天到期的任务也会进入紧急象限。四格分别显示计数并独立滚动。单列按 Doing、Todo 分区，各区按象限排序，并保留条数上限和 Doing 聚焦。
 - 菜单栏托盘：未完成数量徽标、显示/隐藏桌面便签、交互模式开关、设置、退出。设置包含 HUD 页与「高级」页（可选全局快捷键）。
 - 本地 macOS 通知：任务提醒时间到点通知；支持登录时启动。
 - ghostpin-cli 命令行工具：查询、新增、状态切换、修改、删除、JSON 输出和命令级帮助。
@@ -41,7 +41,7 @@ GhostPin 采用本地优先设计。
 - 偏好设置保存在 macOS UserDefaults。
 - 应用除构建依赖外不联网。
 
-任务使用包含 `schemaVersion: 2`、`nextID` 和 `items` 的文档，ID 为从 `10000` 开始的整数，所有组共享编号且删除后不复用。旧 UUID 数组首次成功访问时统一迁入 `默认`，原始字节保存在同目录的 `todos.v1.backup.json`。GhostPin 文件不存在时仍可从旧 `TodoPin/todos.json` 升级，并保留旧源文件。
+macOS 使用包含 `schemaVersion: 3`、`nextID` 和 `items` 的任务文档。ID 从 `10000` 开始，各组共用编号，删除后也不复用。首次成功访问时自动迁移 v2 文档或旧 UUID 数组，并保留原始备份。
 
 升级前退出旧 App 和 CLI，同时更新应用与随包 CLI。旧程序不支持新文档，旧 UUID 不再用于任务操作。回退只恢复迁移时快照，升级后新增和修改需另外保留；详见[任务存储与升级](docs/task-storage.md)。
 
@@ -91,8 +91,8 @@ ghostpin-cli 随应用安装在 App Bundle 内。用户向 Skill 使用固定完
 # 按组查询，也可加 --all
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli list --group GhostPin --json
 
-# 新增任务，必须指定组别
-/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli add "整理周报" --group 默认 --priority medium --due "2026-08-20T18:00:00+08:00" --description "汇总本周数据" --json
+# 新增任务，必须指定组别、重要度和紧迫度
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli add "整理周报" --group 默认 --important false --urgent false --due "2026-08-20T18:00:00+08:00" --description "汇总本周数据" --json
 
 # 修改状态
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli doing <id> --json
@@ -101,7 +101,7 @@ ghostpin-cli 随应用安装在 App Bundle 内。用户向 Skill 使用固定完
 
 # 修改任务字段
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --group GhostPin --json
-/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --title "整理并发送周报" --priority high --due "2026-08-21T18:00:00+08:00" --description "发送给团队" --json
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --title "整理并发送周报" --important true --urgent false --due "2026-08-21T18:00:00+08:00" --description "发送给团队" --json
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --clear-due --json
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update <id> --clear-reminder --json
 
@@ -109,7 +109,7 @@ ghostpin-cli 随应用安装在 App Bundle 内。用户向 Skill 使用固定完
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli delete <id> --json
 ```
 
-`<id>` 必须来自真实查询结果，为十进制整数。每条任务只属于一个组，组名去掉首尾空白后精确、区分大小写地匹配；新增必须显式选择组别，允许指定 `默认`。HUD 保持统一列表，长组名完整保存在数据与 CLI 中。提醒时间和截止日期必须使用带时区的 ISO8601。命令返回非零退出码时视为失败。
+`<id>` 必须来自真实查询结果，为十进制整数。每条任务只属于一个组，组名去掉首尾空白后精确、区分大小写地匹配；新增必须指定 `--group`、`--important` 和 `--urgent`，组别可选 `默认`。HUD 保持统一列表，长组名完整保存在数据与 CLI 中。提醒时间和截止日期必须使用带时区的 ISO8601。命令返回非零退出码时视为失败。
 
 ## 从源码构建
 

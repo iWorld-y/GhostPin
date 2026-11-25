@@ -2,11 +2,11 @@
 
 ## 文档与编号
 
-macOS 任务文件仍为 `~/Library/Application Support/GhostPin/todos.json`，Windows 为 `%LOCALAPPDATA%\GhostPin\todos.json`。顶层文档示例：
+macOS 任务文件为 `~/Library/Application Support/GhostPin/todos.json`，Windows 文件为 `%LOCALAPPDATA%\GhostPin\todos.json`。以下是 macOS v3 文档示例。
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "nextID": 10001,
   "items": [
     {
@@ -15,7 +15,8 @@ macOS 任务文件仍为 `~/Library/Application Support/GhostPin/todos.json`，W
       "title": "整理周报",
       "createdAt": "2026-10-19T09:00:00+08:00",
       "status": "todo",
-      "priority": "medium"
+      "important": true,
+      "urgent": false
     }
   ]
 }
@@ -25,20 +26,18 @@ macOS 任务文件仍为 `~/Library/Application Support/GhostPin/todos.json`，W
 
 每条任务必须有非空组名。输入先去掉首尾空白，再按完整名称区分大小写地匹配；新增必须显式指定组别。内置组名为 `默认`。HUD 的三汉字文本宽度上限仅作用于显示，完整组名保存在任务文件和 CLI 输出中。
 
-存储校验版本、唯一 ID、组别及下一编号。未知版本、缺少组别、重复 ID、空组别、损坏 JSON 和无效计数器均拒绝读写，保留原文件及 App 最后一次有效快照，不自动重置为空库。`list --json` 继续输出任务数组，不输出文档封装。
+每条 v3 任务必须包含布尔字段 `important` 和 `urgent`。截止时间仅影响当前显示和排序，存储中的 `urgent` 保留调用方设置的值。存储拒绝未知版本、重复或非法 ID、无效组别、缺失或非布尔的象限字段、损坏 JSON 和无效计数器，并保留原文件及 App 最后一次有效快照。`list --json` 继续输出任务数组，不输出文档封装。
 
 ## 首次升级
 
-升级前退出旧 App 和 CLI，同时更新应用及随包 CLI。旧程序无法读取新文档，也不遵守本次写锁约定。开发验证只使用临时数据，不替用户升级真实待办。
+升级前退出旧版 macOS App 和 CLI，再同时更新应用及随包 CLI。新版 App 和 CLI 首次成功访问旧文件时，在固定的 `.todos.lock` 内迁移。
 
-首次成功访问旧 UUID 数组时，在固定 `.todos.lock` 保护下执行以下过程：
+- v2 文档会保留原任务的整数 ID、组名、下一编号和其他业务字段，并将原始字节保存至 `todos.v2.backup.json`。
+- v1 UUID 数组会按创建时间升序排列，时间相同时按小写 UUID 排序。从 `10000` 起为全部任务编号（包含已完成任务），统一设为 `默认` 组并保留其他业务字段。原始字节保存在 `todos.v1.backup.json`，任务文件直接升级为 v3。
 
-1. 读取并校验原数组，按创建时间升序排序；时间相同时，按 UUID 小写字符串排序。
-2. 从 `10000` 起为全部任务编号，包含已完成任务；组别统一设为 `默认`，保留既有业务字段及缺省字段兼容行为。
-3. 将原始字节写入同目录的 `todos.v1.backup.json`。相同备份可以复用，不同内容的已有备份会导致失败，绝不覆盖。
-4. 将任务与下一编号一起原子替换为新文档，成功后才发布内存快照。备份或提交失败时保留原文件，重试仍得到同一映射。
+两种旧格式都将 `high` 转为 `important: true`。原来的 `medium`、`low` 和缺失值转为 `important: false`，所有旧任务的 `urgent` 初始值均为 `false`。相同内容的备份可以复用，遇到内容不同的同名备份会中止迁移。备份完成后，任务和下一编号一并写入，并原子替换 `todos.json`。提交失败时保留原文件，重试可复用已保存的同内容备份。
 
-普通查询可以触发迁移。帮助、参数错误和不存在的目标任务不会提交迁移或创建备份。成功写操作可将格式升级与业务修改合并为一次提交，原始备份仍为修改前的数组。任务文件不存在且无旧数据时，普通查询返回空数组，不创建 `todos.json`。
+普通查询可以触发迁移。帮助、参数错误和目标不存在的命令会保留原文件与备份状态。成功写操作会将格式升级与业务修改合并为一次提交。任务文件不存在且无旧数据时，普通查询返回空数组，且不会创建 `todos.json`。
 
 GhostPin 文件优先于 TodoPin 文件。GhostPin 文件不存在时，macOS 在目标目录锁内读取旧 `TodoPin/todos.json`，直接生成新文档和原始备份；旧源文件始终不变。GhostPin 文件已存在但损坏时会报错，不退回旧目录覆盖。
 
@@ -48,7 +47,7 @@ GhostPin 文件优先于 TodoPin 文件。GhostPin 文件不存在时，macOS �
 
 macOS 使用 `flock`，Windows 使用 Rust 标准库文件锁（构建要求 Rust 1.89 或更新版本）。锁文件不随任务文件原子替换而更换，进程退出时操作系统释放锁。请保留 `.todos.lock`，不要在程序运行时删除或替换它。
 
-Windows 同步支持新文档、旧数组迁移、原始备份和锁内状态推进，保留组别及下一编号。不提供 Windows 任务新增 CLI、分组管理 UI 或跨机器同步。本次没有改变两端既有的 HUD 聚焦差异。
+Windows 继续支持 v2 文档和旧数组，v3 适配留待后续变更。Windows 无法读取 macOS v3 文档。
 
 ## 对照旧 UUID
 
