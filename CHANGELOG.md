@@ -17,6 +17,21 @@
 - 升级前退出旧 App 和 CLI，并一起更新应用与随包 CLI。全部历史任务（含已完成）首次成功访问时迁入 `默认`，原始数组保存在同目录 `todos.v1.backup.json`。
 - 旧 UUID 不再接受为操作参数，旧程序不能读取新文档。回退说明见 `docs/task-storage.md`；原始备份不包含升级后的新增和修改。
 
+## v1.4.0 - 2026-11-25
+
+### Changed
+
+- macOS 任务优先级模型升级为正交双轴（`important` 重要度与 `urgent` 紧迫度），替代原有线性三档 `priority`（`high / medium / low`）。保留可选截止时间 `dueAt`，已逾期或本地当天到期的任务在投影与展示层自动视为紧急，不改写存储中的 `urgent`。
+- 统一四象限与单列排序投影：同状态（Doing 在 Todo 前）内按有效象限 `Q1（重要·紧急）→ Q2（重要·不紧急）→ Q3（一般·紧急）→ Q4（一般·不紧急）`、截止时间升序与创建时间倒序排列；取消原有「已逾期任务全局沉底」规则。
+- macOS HUD 任务卡片标记由 `高 / 中 / 低` 升级为四档有效象限标记（`急重 / 重要 / 紧急 / 稍后`），继续位于组别标记左侧并整体右对齐。
+- `ghostpin-cli add` 强制显式传入 `--group`、`--important <true|false>` 与 `--urgent <true|false>`，`update` 支持独立修改 `--important` 与 `--urgent`，移除 `--priority`；JSON 输出以布尔字段 `important`、`urgent` 替代 `priority`，随包 Agent Skill 同步更新。
+
+### Migration
+
+- macOS 任务存储升级至 `schemaVersion: 3`。升级前请退出旧版 GhostPin App 与 CLI，安装新版本后执行 `/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli init --json` 同步本地 Skill。
+- 首次成功访问旧版 v2 文档时自动备份原始字节至 `todos.v2.backup.json` 并迁移至 v3（旧 `high` 映为 `important: true`，`medium`/`low`/缺失/`null` 映为 `important: false`，`urgent` 初始为 `false`，完整保留任务 ID、组别与 `nextID`）；旧 v1 UUID 数组亦支持经 `todos.v1.backup.json` 直接升级至 v3。
+- 本次发布仅涉及 macOS，当前 Windows 端暂不支持读取 v3 文档；详细迁移与回退边界见 `docs/task-storage.md`。
+
 ## v1.3.0 - 2026-11-19
 
 ### Added
