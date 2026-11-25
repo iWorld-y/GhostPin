@@ -2,6 +2,7 @@ import Foundation
 
 /// 任务与下一编号共同持久化，避免删除或清空任务后复用 ID。
 public struct TaskDocument: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 3
     public static let firstID: Int64 = 10000
     // Windows JSON 数字也能精确表示，并给下一编号保留一个位置。
     public static let maximumID: Int64 = 9_007_199_254_740_990
@@ -11,13 +12,13 @@ public struct TaskDocument: Codable, Equatable, Sendable {
     public var items: [TodoItem]
 
     public init(nextID: Int64 = firstID, items: [TodoItem] = []) {
-        self.schemaVersion = 2
+        self.schemaVersion = Self.currentSchemaVersion
         self.nextID = nextID
         self.items = items
     }
 
     public func validate() throws {
-        guard schemaVersion == 2 else {
+        guard schemaVersion == Self.currentSchemaVersion else {
             throw TaskStorageError.invalidDocument("不支持的任务存储版本：\(schemaVersion)")
         }
         guard nextID >= Self.firstID, nextID <= Self.maximumID + 1 else {
@@ -29,8 +30,8 @@ public struct TaskDocument: Codable, Equatable, Sendable {
                   item.id < nextID, identifiers.insert(item.id).inserted else {
                 throw TaskStorageError.invalidDocument("任务 ID 重复、越界或不小于下一编号")
             }
-            guard try TaskGroup.normalize(item.group) == item.group else {
-                throw TaskStorageError.invalidDocument("存储中的组名含首尾空白")
+            guard (try? TaskGroup.normalize(item.group)) == item.group else {
+                throw TaskStorageError.invalidDocument("存储中的组名为空或含首尾空白")
             }
         }
     }

@@ -16,7 +16,8 @@ public struct TodoItemPayload: Encodable {
         case completedAt
         case reminderAt
         case reminderSentAt
-        case priority
+        case important
+        case urgent
         case dueAt
         case description
         case isCompleted
@@ -32,7 +33,8 @@ public struct TodoItemPayload: Encodable {
         try container.encode(item.completedAt, forKey: .completedAt)
         try container.encode(item.reminderAt, forKey: .reminderAt)
         try container.encode(item.reminderSentAt, forKey: .reminderSentAt)
-        try container.encode(item.priority, forKey: .priority)
+        try container.encode(item.important, forKey: .important)
+        try container.encode(item.urgent, forKey: .urgent)
         try container.encode(item.dueAt, forKey: .dueAt)
         try container.encode(item.description, forKey: .description)
         try container.encode(item.isCompleted, forKey: .isCompleted)

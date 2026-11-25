@@ -22,17 +22,21 @@ final class TaskStorage {
             var document = loaded.document
             let result = try operation(&document)
             try document.validate()
-            if let legacyData = loaded.legacyData {
-                try preserveBackup(legacyData)
+            if let backup = loaded.backup {
+                try preserveBackup(backup.data, fileName: backup.fileName)
             }
-            if write || loaded.legacyData != nil {
+            if write || loaded.backup != nil {
                 try JSONFile.save(document, to: fileURL, fileManager: fileManager)
             }
             return (result, document)
         }
     }
 
-    private func readLatest() throws -> (document: TaskDocument, legacyData: Data?) {
+    private struct DocumentVersion: Decodable {
+        let schemaVersion: Int
+    }
+
+    private func readLatest() throws -> (document: TaskDocument, backup: (data: Data, fileName: String)?) {
         let source: URL
         if fileManager.fileExists(atPath: fileURL.path) {
             source = fileURL
@@ -42,28 +46,49 @@ final class TaskStorage {
             return (TaskDocument(), nil)
         }
         let data = try Data(contentsOf: source)
-        let root = try JSONSerialization.jsonObject(with: data)
-        if root is [Any] {
-            let legacy = try JSONDecoder.ghostPin.decode([LegacyTodoItem].self, from: data)
-            guard Set(legacy.map(\.id)).count == legacy.count else {
-                throw TaskStorageError.invalidDocument("旧任务 UUID 重复")
+        do {
+            let root = try JSONSerialization.jsonObject(with: data)
+            if root is [Any] {
+                let document = try migrateV1(data)
+                try document.validate()
+                return (document, (data, "todos.v1.backup.json"))
             }
-            let ordered = legacy.sorted {
-                if $0.createdAt != $1.createdAt {
-                    return $0.createdAt < $1.createdAt
-                }
-                return $0.id.uuidString.lowercased() < $1.id.uuidString.lowercased()
+            let decoder = JSONDecoder.ghostPin
+            let version = try decoder.decode(DocumentVersion.self, from: data).schemaVersion
+            switch version {
+            case 2:
+                let document = try decoder.decode(LegacyV2TaskDocument.self, from: data).migrated()
+                try document.validate()
+                return (document, (data, "todos.v2.backup.json"))
+            case TaskDocument.currentSchemaVersion:
+                let document = try decoder.decode(TaskDocument.self, from: data)
+                try document.validate()
+                return (document, nil)
+            default:
+                throw TaskStorageError.invalidDocument("不支持的任务存储版本：\(version)")
             }
-            let items = ordered.enumerated().map {
-                $0.element.migrated(id: TaskDocument.firstID + Int64($0.offset))
-            }
-            let document = TaskDocument(nextID: TaskDocument.firstID + Int64(items.count), items: items)
-            try document.validate()
-            return (document, data)
+        } catch let error as TaskStorageError {
+            throw error
+        } catch {
+            throw TaskStorageError.invalidDocument("无法解析任务文档：\(error)")
         }
-        let document = try JSONDecoder.ghostPin.decode(TaskDocument.self, from: data)
-        try document.validate()
-        return (document, nil)
+    }
+
+    private func migrateV1(_ data: Data) throws -> TaskDocument {
+        let legacy = try JSONDecoder.ghostPin.decode([LegacyTodoItem<UUID>].self, from: data)
+        guard Set(legacy.map(\.id)).count == legacy.count else {
+            throw TaskStorageError.invalidDocument("旧任务 UUID 重复")
+        }
+        let ordered = legacy.sorted {
+            if $0.createdAt != $1.createdAt {
+                return $0.createdAt < $1.createdAt
+            }
+            return $0.id.uuidString.lowercased() < $1.id.uuidString.lowercased()
+        }
+        let items = ordered.enumerated().map {
+            $0.element.migrated(id: TaskDocument.firstID + Int64($0.offset), group: TaskGroup.defaultName)
+        }
+        return TaskDocument(nextID: TaskDocument.firstID + Int64(items.count), items: items)
     }
 
     private func withLock<Result>(_ operation: () throws -> Result) throws -> Result {
@@ -86,8 +111,8 @@ final class TaskStorage {
         return try operation()
     }
 
-    private func preserveBackup(_ data: Data) throws {
-        let backupURL = fileURL.deletingLastPathComponent().appendingPathComponent("todos.v1.backup.json")
+    private func preserveBackup(_ data: Data, fileName: String) throws {
+        let backupURL = fileURL.deletingLastPathComponent().appendingPathComponent(fileName)
         let descriptor = Darwin.open(backupURL.path, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, S_IRUSR | S_IWUSR)
         if descriptor < 0 {
             guard errno == EEXIST else {

@@ -59,8 +59,9 @@ description: 通过已安装的 GhostPin 应用命令行安装或更新本 skill
 2. 修改已有任务前，使用 `list --all --json` 获取真实整数 ID；明确组别时可加 `--group <组名>`。用户已给出当前整数 ID 时可直接使用，不使用旧 UUID、列表序号或推测编号。
 3. 按标题定位时，若存在多个同名任务且无法消歧，列出候选的整数 ID、组别和标题并询问用户。
 4. 只执行用户明确要求的操作；删除范围不明确时先询问。
-5. 写操作成功后检查退出码、整数 ID、组别和修改字段；删除后再次全量查询确认目标 ID 已不存在。
-6. 每条任务只属于一个组。新增必须显式传 `--group`；用户或既有明确上下文没有确定组别时，先询问，不自动选择 `默认`。组名去掉首尾空白后区分大小写，长组名完整保存。
+5. 新增、修改或切换状态后，检查退出码、整数 ID、组别、布尔字段 `important` 和 `urgent`，并核对请求修改的其他字段。删除后再次全量查询，确认目标 ID 已不存在。
+6. 每条任务只属于一个组。新增必须显式传入 `--group`、`--important` 和 `--urgent`。组名去掉首尾空白后区分大小写，长组名完整保存。
+7. 用户或上下文已明确组别、重要度和紧迫度时，直接传入对应的值。缺少信息时，一次确认组别、重要度、紧迫度和是否设置截止时间。两个布尔参数仅接受 `true` 或 `false`。
 
 ## 常用命令
 
@@ -75,7 +76,7 @@ description: 通过已安装的 GhostPin 应用命令行安装或更新本 skill
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli list --group GhostPin --all --json
 
 # 用户明确选择“默认”组后新增
-/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli add "整理周报" --group 默认 --priority medium --due "2026-08-20T18:00:00+08:00" --description "汇总本周数据" --json
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli add "整理周报" --group 默认 --important false --urgent false --due "2026-08-20T18:00:00+08:00" --description "汇总本周数据" --json
 
 # 以下 ID 仅为示例，执行时使用真实查询结果
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli doing 10000 --json
@@ -85,8 +86,11 @@ description: 通过已安装的 GhostPin 应用命令行安装或更新本 skill
 # 换组，ID 保持不变
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update 10000 --group GhostPin --json
 
-# 修改标题、优先级、截止日期或描述
-/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update 10000 --title "整理并发送周报" --priority high --due "2026-08-21T18:00:00+08:00" --description "发送给团队" --json
+# 修改重要度和紧迫度
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update 10000 --important true --urgent true --json
+
+# 修改标题、截止日期或描述
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update 10000 --title "整理并发送周报" --due "2026-08-21T18:00:00+08:00" --description "发送给团队" --json
 
 # 清除截止日期或提醒
 /Applications/GhostPin.app/Contents/MacOS/ghostpin-cli update 10000 --clear-due --json
@@ -102,11 +106,11 @@ description: 通过已安装的 GhostPin 应用命令行安装或更新本 skill
 标题以 `--` 开头时，把 `--json` 放在 `--` 前：
 
 ```bash
-/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli add --group 默认 --json -- "--检查参数解析"
+/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli add --group 默认 --important false --urgent false --json -- "--检查参数解析"
 ```
 
 命令返回非零退出码时视为失败，保留并报告错误信息，不要声称任务已处理。
 
 ## 输出
 
-完成后简洁说明实际动作、任务标题、整数 ID 和组别。新增成功结果中的 `item.id` 必须是整数，`item.group` 必须与请求组别一致。查询请求直接整理结果，不展示无关原始输出。
+完成后简洁说明实际动作、任务标题、整数 ID 和组别。新增时同时说明保存的重要度、紧迫度与有效象限。已逾期或本地当天到期的任务在界面中按紧急展示。新增成功结果中的 `item.id` 必须是整数，`item.group` 必须与请求组别一致。检查返回的 `item.important` 和 `item.urgent` 均为布尔值且与请求一致。查询请求直接整理结果，不展示无关原始输出。

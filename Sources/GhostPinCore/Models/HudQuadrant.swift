@@ -1,17 +1,24 @@
 import Foundation
 
-/// 四象限分类：高优先级为重要，中、低优先级为一般；
-/// 已逾期或本地今天到期为紧急，其余（含无截止日期）为不紧急。
+/// 已逾期或本地今天到期的任务在展示时视为紧急。
 public enum HudQuadrant: String, CaseIterable, Sendable {
     case importantUrgent
     case importantNotUrgent
     case generalUrgent
     case generalNotUrgent
 
-    public static func classify(priority: Priority, dueAt: Date?, nextDayStart: Date) -> HudQuadrant {
-        let important = priority == .high
-        let urgent = dueAt.map { $0 < nextDayStart } ?? false
-        switch (important, urgent) {
+    public var sortRank: Int {
+        switch self {
+        case .importantUrgent: return 1
+        case .importantNotUrgent: return 2
+        case .generalUrgent: return 3
+        case .generalNotUrgent: return 4
+        }
+    }
+
+    public static func classify(important: Bool, urgent: Bool, dueAt: Date?, nextDayStart: Date) -> HudQuadrant {
+        let effectiveUrgent = urgent || (dueAt.map { $0 < nextDayStart } ?? false)
+        switch (important, effectiveUrgent) {
         case (true, true):
             return .importantUrgent
         case (true, false):
