@@ -33,10 +33,22 @@ public final class TodoStore: ObservableObject {
         _ operation: (inout TaskDocument) throws -> Result
     ) throws -> Result {
         let (result, document) = try storage.access(write: write, operation)
+        try publish(document)
+        return result
+    }
+
+    private func publish(_ document: TaskDocument) throws {
         let loaded = Self.sortByCreatedAtDescending(document.items)
         if try JSONFile.canonicalData(loaded) != JSONFile.canonicalData(items) {
             items = loaded
         }
+    }
+
+    private func dragTransact(
+        _ operation: (inout TaskDocument) throws -> (HudDragResult, Bool)
+    ) throws -> HudDragResult {
+        let (result, document) = try storage.access(committing: operation)
+        try publish(document)
         return result
     }
 
@@ -125,6 +137,74 @@ public final class TodoStore: ObservableObject {
 
     public func setCompleted(_ id: TodoItem.ID, completed: Bool, at date: Date = Date()) throws {
         _ = try setStatus(id, status: completed ? .done : .todo, at: date)
+    }
+
+    /// HUD 四象限拖动：锁内按最新任务校验起始象限与投放日期，只更新两个优先级字段。
+    /// 同列保留手动 `urgent`；已逾期或投放当天到期的任务禁放右侧不紧急象限。
+    public func dragToQuadrant(
+        _ id: TodoItem.ID,
+        from: HudQuadrant,
+        to: HudQuadrant,
+        scope: HudScope,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) throws -> HudDragResult {
+        guard from != to else { return .unchanged }
+        let nextDayStart = calendar.ghostPinNextDayStart(after: now)
+        return try dragTransact { document in
+            guard let index = document.items.firstIndex(where: { $0.id == id }) else {
+                return (.taskChanged, false)
+            }
+            let item = document.items[index]
+            guard !item.isCompleted, Self.isInScope(item, scope: scope, now: now, calendar: calendar) else {
+                return (.taskChanged, false)
+            }
+            if !to.isUrgentColumn, let dueAt = item.dueAt, dueAt < nextDayStart {
+                return (.dueDateRestricted(item), false)
+            }
+            let current = HudQuadrant.classify(important: item.important, urgent: item.urgent, dueAt: item.dueAt, nextDayStart: nextDayStart)
+            guard current == from else {
+                return (.taskChanged, false)
+            }
+            document.items[index].important = to.isImportantRow
+            if to.isUrgentColumn != from.isUrgentColumn {
+                document.items[index].urgent = to.isUrgentColumn
+            }
+            return (.moved(document.items[index]), true)
+        }
+    }
+
+    /// HUD 单列拖动：只在 Todo 与 Doing 之间切换，锁内校验起始状态与显示范围。
+    public func dragToStatus(
+        _ id: TodoItem.ID,
+        from: TodoStatus,
+        to: TodoStatus,
+        scope: HudScope,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) throws -> HudDragResult {
+        guard from != to, from != .done, to != .done else { return .unchanged }
+        return try dragTransact { document in
+            guard let index = document.items.firstIndex(where: { $0.id == id }) else {
+                return (.taskChanged, false)
+            }
+            let item = document.items[index]
+            guard item.status == from, Self.isInScope(item, scope: scope, now: now, calendar: calendar) else {
+                return (.taskChanged, false)
+            }
+            document.items[index].status = to
+            document.items[index].completedAt = nil
+            return (.moved(document.items[index]), true)
+        }
+    }
+
+    private static func isInScope(_ item: TodoItem, scope: HudScope, now: Date, calendar: Calendar) -> Bool {
+        switch scope {
+        case .all:
+            return true
+        case .today:
+            return item.createdAt >= calendar.ghostPinDayStart(for: now)
+        }
     }
 
     public func markTimedReminderSent(_ id: TodoItem.ID, at date: Date = Date()) throws {

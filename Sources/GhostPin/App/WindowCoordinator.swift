@@ -138,6 +138,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     }
 
     func hideBoard() {
+        appState?.cancelHudDrag()
         boardWindow?.orderOut(nil)
     }
 
@@ -375,6 +376,10 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         if notification.object as AnyObject? === boardWindow {
             boardWindow?.contentView = nil
         }
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        appState?.cancelHudDrag()
     }
 
     func windowDidMove(_ notification: Notification) {
