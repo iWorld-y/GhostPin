@@ -19,6 +19,9 @@ final class AppState: ObservableObject {
     @Published var hotKeySetupState: HotKeySetupState = .disabled
     @Published var hotKeyNotice: String?
 
+    /// 隐藏窗口或窗口失焦时递增，通知 HUD 视图清除当前拖动。
+    @Published private(set) var hudDragCancelToken: Int = 0
+
     private let todosURL: URL
     private var todoFileWatcher: TodoFileWatcher?
     private var hotKeyService: HotKeyService?
@@ -210,6 +213,57 @@ final class AppState: ObservableObject {
         }
     }
 
+    func cancelHudDrag() {
+        hudDragCancelToken += 1
+    }
+
+    /// HUD 四象限投放：模式、视图或范围已变化时静默取消，其余交给 Core 受限写入。
+    /// 返回界面反馈文案；nil 表示无需提示。
+    func dropTaskInQuadrants(_ item: TodoItem, from: HudQuadrant, to: HudQuadrant, startedIn scope: HudScope) -> String? {
+        guard preferences.hudMode == .interactive,
+              preferences.effectiveHudView == .quadrants,
+              preferences.hudScope == scope else {
+            return nil
+        }
+        do {
+            switch try todoStore.dragToQuadrant(item.id, from: from, to: to, scope: scope) {
+            case .moved:
+                return "已移到「\(to.displayTitle)」"
+            case .unchanged:
+                return nil
+            case .taskChanged:
+                return "任务已变更，本次拖动未保存"
+            case let .dueDateRestricted(latest):
+                return latest.isOverdue() ? "已逾期的任务不能放入不紧急象限" : "今天到期的任务不能放入不紧急象限"
+            }
+        } catch {
+            report(error)
+            return "保存失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// HUD 单列投放：只在 Todo 与 Doing 之间切换，守卫与四象限投放一致。
+    func dropTaskInList(_ item: TodoItem, from: TodoStatus, to: TodoStatus, startedIn scope: HudScope) -> String? {
+        guard preferences.hudMode == .interactive,
+              preferences.effectiveHudView == .list,
+              preferences.hudScope == scope else {
+            return nil
+        }
+        do {
+            switch try todoStore.dragToStatus(item.id, from: from, to: to, scope: scope) {
+            case .moved:
+                return "已移到 \(to == .doing ? "Doing" : "Todo")"
+            case .unchanged, .dueDateRestricted:
+                return nil
+            case .taskChanged:
+                return "任务已变更，本次拖动未保存"
+            }
+        } catch {
+            report(error)
+            return "保存失败：\(error.localizedDescription)"
+        }
+    }
+
     func updateBoardLevel() {
         windowCoordinator.updateHUD()
     }
@@ -335,3 +389,189 @@ final class AppState: ObservableObject {
         lastErrorMessage = error.localizedDescription
     }
 }
+
+#if DEBUG
+extension AppState {
+    /// 拖动自测：隔离根内驱动真实投放入口，校验守卫、反馈与持久化；不创建窗口、不读桌面。
+    func runDragSelfTest() -> Bool {
+        let now = Date()
+        let calendar = Calendar.current
+        let dueToday = min(now.addingTimeInterval(60), calendar.ghostPinDayEnd(for: now))
+        let overdueAt = Date(timeIntervalSince1970: floor(now.timeIntervalSince1970 - 3600))
+        var ok = true
+        func expect(_ name: String, _ condition: Bool) {
+            print("SELFTEST \(name) \(condition ? "PASS" : "FAIL")")
+            ok = ok && condition
+        }
+
+        preferences.hudMode = .interactive
+        preferences.hudInteractiveView = .quadrants
+        preferences.hudScope = .all
+
+        guard let later = try? todoStore.add(title: "自测稍后", group: "默认", important: false, urgent: false, createdAt: now),
+              let today = try? todoStore.add(title: "自测今天到期", group: "默认", important: false, urgent: false, createdAt: now, dueAt: dueToday),
+              let manual = try? todoStore.add(title: "自测手动紧急", group: "默认", important: false, urgent: true, createdAt: now) else {
+            print("SELFTEST seed FAIL")
+            return false
+        }
+
+        let movedNotice = dropTaskInQuadrants(later, from: .generalNotUrgent, to: .importantUrgent, startedIn: .all)
+        let movedItem = todoStore.items.first { $0.id == later.id }
+        expect("quadrantMove", movedNotice == "已移到「优先处理」" && movedItem?.important == true && movedItem?.urgent == true)
+        let projection = todoStore.hudQuadrantProjection(scope: .all)
+        expect("quadrantCounts", projection.cell(.importantUrgent).count == 1 && projection.cell(.generalUrgent).count == 2 && projection.cell(.generalNotUrgent).count == 0)
+        expect("sameCell", dropTaskInQuadrants(later, from: .importantUrgent, to: .importantUrgent, startedIn: .all) == nil)
+
+        let blockedNotice = dropTaskInQuadrants(today, from: .generalUrgent, to: .generalNotUrgent, startedIn: .all)
+        let blockedItem = todoStore.items.first { $0.id == today.id }
+        expect("dueBlocked", blockedNotice == "今天到期的任务不能放入不紧急象限" && blockedItem?.important == false && blockedItem?.urgent == false)
+
+        preferences.hudMode = .passthrough
+        expect("modeGuard", dropTaskInQuadrants(manual, from: .generalUrgent, to: .importantUrgent, startedIn: .all) == nil)
+        preferences.hudMode = .interactive
+        preferences.hudInteractiveView = .list
+        expect("viewGuard", dropTaskInQuadrants(manual, from: .generalUrgent, to: .importantUrgent, startedIn: .all) == nil)
+        preferences.hudInteractiveView = .quadrants
+        expect("scopeGuard", dropTaskInQuadrants(manual, from: .generalUrgent, to: .importantUrgent, startedIn: .today) == nil)
+        expect("guardNoWrite", todoStore.items.first { $0.id == manual.id }?.important == false)
+
+        preferences.hudInteractiveView = .list
+        preferences.hudFocusDoing = true
+        preferences.hudMaxItems = 8
+        let listNotice = dropTaskInList(manual, from: .todo, to: .doing, startedIn: .all)
+        expect("listMove", listNotice == "已移到 Doing" && todoStore.items.first { $0.id == manual.id }?.status == .doing)
+
+        guard let second = try? todoStore.add(title: "自测第二条", group: "默认", important: false, urgent: false, createdAt: now) else {
+            print("SELFTEST seedSecond FAIL")
+            return false
+        }
+        _ = try? todoStore.setStatus(second.id, status: .doing)
+        let backNotice = dropTaskInList(manual, from: .doing, to: .todo, startedIn: .all)
+        let focused = todoStore.hudProjection(scope: .all, maxCount: 8, focusDoing: true)
+        expect("focusBack", backNotice == "已移到 Todo" && focused.doing.map(\.id) == [second.id] && focused.todo.isEmpty && focused.todoCount >= 1)
+
+        preferences.hudFocusDoing = false
+        preferences.hudMaxItems = 1
+        let limited = todoStore.hudProjection(scope: .all, maxCount: 1, focusDoing: false)
+        expect("limitHidden", limited.doing.count == 1 && limited.todo.isEmpty)
+        let limitNotice = dropTaskInList(second, from: .doing, to: .todo, startedIn: .all)
+        expect("limitMove", limitNotice == "已移到 Todo" && todoStore.items.first { $0.id == second.id }?.status == .todo)
+
+        guard let overdueItem = try? todoStore.add(title: "自测逾期", group: "默认", important: true, urgent: false, createdAt: now, dueAt: overdueAt) else {
+            print("SELFTEST seedOverdue FAIL")
+            return false
+        }
+        _ = try? todoStore.setStatus(overdueItem.id, status: .doing)
+        let overdueNotice = dropTaskInList(overdueItem, from: .doing, to: .todo, startedIn: .all)
+        let overdueLatest = todoStore.items.first { $0.id == overdueItem.id }
+        expect("overdueSwitch", overdueNotice == "已移到 Todo" && overdueLatest?.status == .todo && overdueLatest?.dueAt == overdueAt)
+
+        try? todoStore.delete(second.id)
+        expect("deletedRejected", dropTaskInList(second, from: .todo, to: .doing, startedIn: .all) == "任务已变更，本次拖动未保存")
+
+        let reloaded = TodoStore(fileURL: todosURL)
+        try? reloaded.load()
+        expect("persisted", reloaded.items.first { $0.id == later.id }?.important == true
+            && reloaded.items.first { $0.id == manual.id }?.status == .todo
+            && reloaded.items.first { $0.id == overdueItem.id }?.status == .todo)
+
+        // 手势生命周期回归：与视图回调共用 HudDragLifecycle 判定。
+        var lifecycle = HudDragLifecycle()
+        let dragItem = todoStore.items.first { $0.id == later.id } ?? later
+        let startContext = HudDragContext(isInteractive: true, view: .quadrants, scope: .all, cancelToken: 0)
+        let cancelledContext = HudDragContext(isInteractive: true, view: .quadrants, scope: .all, cancelToken: 1)
+        let origin = CGPoint(x: 40, y: 40)
+        let dropPoint = CGPoint(x: 300, y: 60)
+
+        lifecycle.begin()
+        lifecycle.move(dragItem, quadrant: .importantUrgent, to: origin, context: startContext)
+        expect("gestureSession", lifecycle.session?.item.id == dragItem.id
+            && lifecycle.session?.startQuadrant == .importantUrgent
+            && lifecycle.session?.startContext == startContext)
+
+        // 环境取消后，同一物理手势的旧 change/up 全部无效。
+        lifecycle.cancel()
+        lifecycle.move(dragItem, quadrant: .importantUrgent, to: dropPoint, context: cancelledContext)
+        expect("cancelBlocksStaleMove", lifecycle.session == nil)
+        expect("cancelBlocksStaleEnd", lifecycle.end(dragItem, at: dropPoint, context: cancelledContext) == nil)
+
+        // 松手后一次全新手势正常开始。
+        lifecycle.begin()
+        lifecycle.move(dragItem, quadrant: .importantUrgent, to: origin, context: cancelledContext)
+        expect("freshGestureAfterCancel", lifecycle.session != nil)
+
+        // 投放同步核对取消代次/视图/范围，不依赖下一帧 onChange。
+        expect("staleTokenEnd", lifecycle.end(dragItem, at: dropPoint, context: startContext) == nil)
+        lifecycle.begin()
+        lifecycle.move(dragItem, quadrant: .importantUrgent, to: origin, context: cancelledContext)
+        expect("staleViewEnd", lifecycle.end(dragItem, at: dropPoint, context: HudDragContext(isInteractive: true, view: .list, scope: .all, cancelToken: 1)) == nil)
+        lifecycle.begin()
+        lifecycle.move(dragItem, quadrant: .importantUrgent, to: origin, context: cancelledContext)
+        expect("staleScopeEnd", lifecycle.end(dragItem, at: dropPoint, context: HudDragContext(isInteractive: true, view: .quadrants, scope: .today, cancelToken: 1)) == nil)
+
+        // 穿透模式：移动立即作废会话，投放被拒。
+        lifecycle.begin()
+        lifecycle.move(dragItem, quadrant: .importantUrgent, to: origin, context: cancelledContext)
+        let passthroughContext = HudDragContext(isInteractive: false, view: .list, scope: .all, cancelToken: 1)
+        lifecycle.move(dragItem, quadrant: .importantUrgent, to: dropPoint, context: passthroughContext)
+        expect("passthroughCancels", lifecycle.session == nil)
+        expect("passthroughEnd", lifecycle.end(dragItem, at: dropPoint, context: passthroughContext) == nil)
+
+        // 源手柄消失：清理会话并封锁残留回调；新手势仍可开始。
+        lifecycle.begin()
+        lifecycle.move(dragItem, quadrant: .importantUrgent, to: origin, context: cancelledContext)
+        lifecycle.cancelSource(dragItem.id)
+        expect("sourceGoneCancels", lifecycle.session == nil)
+        lifecycle.move(dragItem, quadrant: .importantUrgent, to: dropPoint, context: cancelledContext)
+        expect("sourceGoneBlocksStaleMove", lifecycle.session == nil)
+        lifecycle.begin()
+        lifecycle.move(dragItem, quadrant: .importantUrgent, to: origin, context: cancelledContext)
+        expect("sourceGoneFreshGesture", lifecycle.session != nil)
+
+        // 手势被系统取消（GestureState 复位，无 onEnded）：清理残留并解除封锁。
+        lifecycle.gestureFinished(dragItem.id)
+        expect("gestureResetCancels", lifecycle.session == nil)
+        lifecycle.begin()
+        lifecycle.move(dragItem, quadrant: .importantUrgent, to: origin, context: cancelledContext)
+        expect("gestureResetFreshGesture", lifecycle.session != nil)
+
+        // 其他任务的旧 up 不影响当前会话；有效投放返回会话并清空。
+        expect("otherItemEndIgnored", lifecycle.end(manual, at: dropPoint, context: cancelledContext) == nil && lifecycle.session != nil)
+        let ended = lifecycle.end(dragItem, at: dropPoint, context: cancelledContext)
+        expect("validEndReturnsSession", ended?.item.id == dragItem.id && ended?.location == dropPoint && lifecycle.session == nil)
+
+        // 无会话时取消不应封锁后续手势。
+        lifecycle.cancel()
+        lifecycle.move(dragItem, quadrant: .importantUrgent, to: origin, context: cancelledContext)
+        expect("idleCancelNoPoison", lifecycle.session != nil)
+        lifecycle.gestureFinished(dragItem.id)
+
+        // 预览放置：最小 HUD 与右下角不越界，指针处仍可命中落点。
+        let preview = DesktopNotesBoardView.dragPreviewSize
+        let margin: CGFloat = 8
+        func previewFits(_ location: CGPoint, _ board: CGSize) -> Bool {
+            let offset = DesktopNotesBoardView.dragPreviewOffset(for: location, boardSize: board)
+            return offset.x >= margin && offset.y >= margin
+                && offset.x + preview.width <= board.width - margin
+                && offset.y + preview.height <= board.height - margin
+        }
+        let listMin = DesktopNotesBoardView.interactiveMinimumSize
+        let quadrantMin = DesktopNotesBoardView.quadrantsMinimumSize
+        let listBoard = CGSize(width: listMin.width, height: listMin.height)
+        let quadrantBoard = CGSize(width: quadrantMin.width, height: quadrantMin.height)
+        expect("previewCenter", DesktopNotesBoardView.dragPreviewOffset(for: CGPoint(x: 100, y: 60), boardSize: quadrantBoard) == CGPoint(x: 114, y: 74))
+        expect("previewMinListCorner", previewFits(CGPoint(x: listBoard.width - 1, y: listBoard.height - 1), listBoard))
+        expect("previewMinQuadrantCorner", previewFits(CGPoint(x: quadrantBoard.width - 1, y: quadrantBoard.height - 1), quadrantBoard))
+        expect("previewRightEdge", previewFits(CGPoint(x: quadrantBoard.width - 2, y: 100), quadrantBoard))
+        expect("previewBottomEdge", previewFits(CGPoint(x: 100, y: quadrantBoard.height - 2), quadrantBoard))
+        expect("previewOutsideClamped", previewFits(CGPoint(x: quadrantBoard.width + 40, y: quadrantBoard.height + 40), quadrantBoard))
+        let cornerOffset = DesktopNotesBoardView.dragPreviewOffset(for: CGPoint(x: listBoard.width - 1, y: listBoard.height - 1), boardSize: listBoard)
+        expect("previewCornerClearsPointer", cornerOffset.x + preview.width < listBoard.width - 1 && cornerOffset.y + preview.height < listBoard.height - 1)
+
+        let token = hudDragCancelToken
+        cancelHudDrag()
+        expect("cancelToken", hudDragCancelToken == token + 1)
+        return ok
+    }
+}
+#endif

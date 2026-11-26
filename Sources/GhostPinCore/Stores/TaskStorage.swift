@@ -22,14 +22,34 @@ final class TaskStorage {
             var document = loaded.document
             let result = try operation(&document)
             try document.validate()
-            if let backup = loaded.backup {
-                try preserveBackup(backup.data, fileName: backup.fileName)
-            }
             if write || loaded.backup != nil {
-                try JSONFile.save(document, to: fileURL, fileManager: fileManager)
+                try commit(document, backup: loaded.backup)
             }
             return (result, document)
         }
+    }
+
+    /// 拖动受限写入：operation 返回结果与是否提交；拒绝时不做任何写入，包括迁移。
+    func access<Result>(
+        committing operation: (inout TaskDocument) throws -> (Result, Bool)
+    ) throws -> (Result, TaskDocument) {
+        try withLock {
+            let loaded = try readLatest()
+            var document = loaded.document
+            let (result, shouldCommit) = try operation(&document)
+            try document.validate()
+            if shouldCommit {
+                try commit(document, backup: loaded.backup)
+            }
+            return (result, document)
+        }
+    }
+
+    private func commit(_ document: TaskDocument, backup: (data: Data, fileName: String)?) throws {
+        if let backup {
+            try preserveBackup(backup.data, fileName: backup.fileName)
+        }
+        try JSONFile.save(document, to: fileURL, fileManager: fileManager)
     }
 
     private struct DocumentVersion: Decodable {

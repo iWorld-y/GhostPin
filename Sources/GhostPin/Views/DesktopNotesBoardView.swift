@@ -13,14 +13,32 @@ struct DesktopNotesBoardView: View {
     static let interactiveMinimumSize = NSSize(width: 320, height: 184)
     static let quadrantsDefaultSize = NSSize(width: 720, height: 592)
     static let quadrantsMinimumSize = NSSize(width: 560, height: 320)
+    static let hudCoordinateSpace = "GhostPinHUD"
     private static let headerHeight: CGFloat = 39
     private static let toolbarHeight: CGFloat = 40
     private static let footerHeight: CGFloat = 25
     private static let maximumBodyHeight: CGFloat = 396
     private static let emptyBodyHeight: CGFloat = 80
+    /// 预览放置用的保守外框：宽 220 + 水平内边距，高按两行文案预留。
+    static let dragPreviewSize = CGSize(width: 240, height: 44)
+    private static let dragPreviewMargin: CGFloat = 8
+    private static let dragPreviewGap: CGFloat = 14
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var contentHeight: CGFloat = maximumBodyHeight
+    @State private var dragLifecycle = HudDragLifecycle()
+    @State private var dragNotice: String?
+    @State private var dropFrames: [HudDropTarget: CGRect] = [:]
+
+    private var drag: TaskDragSession? { dragLifecycle.session }
+    private var dragContext: HudDragContext {
+        HudDragContext(
+            isInteractive: isInteractive,
+            view: appState.preferences.effectiveHudView,
+            scope: appState.preferences.hudScope,
+            cancelToken: appState.hudDragCancelToken
+        )
+    }
 
     var body: some View {
         let view = appState.preferences.effectiveHudView
@@ -59,6 +77,7 @@ struct DesktopNotesBoardView: View {
                 footer(visibleCount: visibleCount, totalCount: doingCount + todoCount)
                     .frame(height: Self.footerHeight)
             }
+            .overlay(alignment: .topLeading) { dragPreviewOverlay(boardSize: geometry.size) }
         }
         .frame(minWidth: Self.minimumSize.width, minHeight: Self.minimumSize.height)
         .background {
@@ -71,6 +90,11 @@ struct DesktopNotesBoardView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(.primary.opacity(isInteractive ? 0.14 : 0.1), lineWidth: 1)
                 .allowsHitTesting(false)
+        }
+        .overlay(alignment: .bottom) {
+            if let dragNotice {
+                dragNoticeView(dragNotice)
+            }
         }
         .shadow(color: .black.opacity(isInteractive ? 0.18 : 0.11), radius: 20, y: 8)
         .saturation(isInteractive ? 1 : 0.88)
@@ -89,6 +113,14 @@ struct DesktopNotesBoardView: View {
                 reportPreferredHeight(Self.emptyBodyHeight)
             }
         }
+        .coordinateSpace(name: Self.hudCoordinateSpace)
+        .onPreferenceChange(HudDropFrameKey.self) { frames in
+            dropFrames = frames
+        }
+        .onChange(of: isInteractive) { _, _ in dragLifecycle.cancel() }
+        .onChange(of: view) { _, _ in dragLifecycle.cancel() }
+        .onChange(of: appState.preferences.hudScope) { _, _ in dragLifecycle.cancel() }
+        .onChange(of: appState.hudDragCancelToken) { _, _ in dragLifecycle.cancel() }
     }
 
     @ViewBuilder
@@ -219,12 +251,21 @@ struct DesktopNotesBoardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(dropFrameReporter(.quadrant(cell.quadrant)))
+        .overlay {
+            if let drag, dropTarget(at: drag.location) == .quadrant(cell.quadrant) {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(dropStrokeColor(for: .quadrant(cell.quadrant), session: drag), lineWidth: 2)
+                    .padding(3)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     private func quadrantHeading(_ cell: HudQuadrantCell) -> some View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(quadrantTitle(cell.quadrant))
+                Text(cell.quadrant.displayTitle)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(cell.quadrant == .importantUrgent ? Color.red : Color.primary)
                 Text(quadrantSubtitle(cell.quadrant))
@@ -254,19 +295,6 @@ struct DesktopNotesBoardView: View {
         .foregroundStyle(.secondary)
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func quadrantTitle(_ quadrant: HudQuadrant) -> String {
-        switch quadrant {
-        case .importantUrgent:
-            return "优先处理"
-        case .importantNotUrgent:
-            return "安排时间"
-        case .generalUrgent:
-            return "及时处理"
-        case .generalNotUrgent:
-            return "稍后处理"
-        }
     }
 
     private func quadrantSubtitle(_ quadrant: HudQuadrant) -> String {
@@ -346,6 +374,17 @@ struct DesktopNotesBoardView: View {
                 .accessibilityHidden(true)
             }
         }
+        .overlay(alignment: .bottom) {
+            // 拖动期间的临时落点：不计入条数上限，也不改变窗口尺寸。
+            if drag != nil {
+                HStack(spacing: 8) {
+                    listDropZone(.todo, title: "Todo")
+                    listDropZone(.doing, title: "Doing")
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
+            }
+        }
         .onPreferenceChange(HUDContentHeightKey.self) { height in
             guard height > 0 else { return }
             contentHeight = height
@@ -368,7 +407,9 @@ struct DesktopNotesBoardView: View {
                     important: item.important, urgent: item.urgent, dueAt: item.dueAt, nextDayStart: nextDayStart
                 )
                 DesktopNoteRowView(
-                    item: item, quadrant: effectiveQuadrant, isOverdue: item.isOverdue(now: now), isInteractive: isInteractive
+                    item: item, quadrant: effectiveQuadrant, isOverdue: item.isOverdue(now: now), isInteractive: isInteractive,
+                    isDragSource: drag?.item.id == item.id,
+                    onDragEvent: { event in handleDragEvent(event, item: item, quadrant: effectiveQuadrant) }
                 ) {
                     appState.advanceStatus(item)
                 }
@@ -472,6 +513,194 @@ struct DesktopNotesBoardView: View {
         appState.preferences.hudMode == .interactive
     }
 
+    private func handleDragEvent(_ event: HudDragGestureEvent, item: TodoItem, quadrant: HudQuadrant) {
+        switch event {
+        case .began:
+            dragLifecycle.begin()
+        case let .moved(location):
+            dragLifecycle.move(item, quadrant: quadrant, to: location, context: dragContext)
+        case let .ended(location):
+            finishDrag(item, at: location)
+        case .gestureReset:
+            dragLifecycle.gestureFinished(item.id)
+        case .sourceDisappeared:
+            dragLifecycle.cancelSource(item.id)
+        }
+    }
+
+    private func finishDrag(_ item: TodoItem, at location: CGPoint) {
+        guard let session = dragLifecycle.end(item, at: location, context: dragContext) else { return }
+        var notice: String?
+        if let target = dropTarget(at: location) {
+            switch target {
+            case let .quadrant(to):
+                if to != session.startQuadrant {
+                    notice = appState.dropTaskInQuadrants(session.item, from: session.startQuadrant, to: to, startedIn: session.startContext.scope)
+                }
+            case let .status(to):
+                if to != session.startStatus {
+                    notice = appState.dropTaskInList(session.item, from: session.startStatus, to: to, startedIn: session.startContext.scope)
+                }
+            }
+        }
+        if let notice {
+            dragNotice = notice
+        }
+    }
+
+    /// 原分区/原状态不是有效目标：不显示有效高亮，投放也不改动。
+    private func isSourceTarget(_ target: HudDropTarget, session: TaskDragSession) -> Bool {
+        switch target {
+        case let .quadrant(quadrant): return quadrant == session.startQuadrant
+        case let .status(status): return status == session.startStatus
+        }
+    }
+
+    private func dropStrokeColor(for target: HudDropTarget, session: TaskDragSession) -> Color {
+        if isSourceTarget(target, session: session) {
+            return .primary.opacity(0.2)
+        }
+        if isBlocked(target, item: session.item) {
+            return .red.opacity(0.7)
+        }
+        return .accentColor.opacity(0.8)
+    }
+
+    private func dropTarget(at point: CGPoint) -> HudDropTarget? {
+        if appState.preferences.effectiveHudView == .quadrants {
+            for quadrant in HudQuadrant.allCases {
+                if dropFrames[.quadrant(quadrant)]?.contains(point) == true {
+                    return .quadrant(quadrant)
+                }
+            }
+        } else {
+            for status in [TodoStatus.doing, .todo] {
+                if dropFrames[.status(status)]?.contains(point) == true {
+                    return .status(status)
+                }
+            }
+        }
+        return nil
+    }
+
+    private func isBlocked(_ target: HudDropTarget, item: TodoItem) -> Bool {
+        guard case let .quadrant(quadrant) = target, !quadrant.isUrgentColumn else { return false }
+        let nextDayStart = Calendar.current.ghostPinNextDayStart(after: Date())
+        return item.dueAt.map { $0 < nextDayStart } ?? false
+    }
+
+    private func blockReason(for item: TodoItem) -> String {
+        item.isOverdue() ? "已逾期的任务不能放入不紧急象限" : "今天到期的任务不能放入不紧急象限"
+    }
+
+    private func dropTitle(_ target: HudDropTarget) -> String {
+        switch target {
+        case let .quadrant(quadrant): return quadrant.displayTitle
+        case let .status(status): return status == .doing ? "Doing" : "Todo"
+        }
+    }
+
+    private func dropFrameReporter(_ target: HudDropTarget) -> some View {
+        GeometryReader { proxy in
+            Color.clear.preference(key: HudDropFrameKey.self, value: [target: proxy.frame(in: .named(Self.hudCoordinateSpace))])
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// 预览默认在指针右下；贴近右/下边缘时翻到另一侧，并夹回板面可见区域。
+    static func dragPreviewOffset(for location: CGPoint, boardSize: CGSize) -> CGPoint {
+        let size = dragPreviewSize
+        let maxX = max(dragPreviewMargin, boardSize.width - dragPreviewMargin - size.width)
+        let maxY = max(dragPreviewMargin, boardSize.height - dragPreviewMargin - size.height)
+        var x = location.x + dragPreviewGap
+        if x > maxX {
+            x = location.x - dragPreviewGap - size.width
+        }
+        var y = location.y + dragPreviewGap
+        if y > maxY {
+            y = location.y - dragPreviewGap - size.height
+        }
+        return CGPoint(x: min(max(x, dragPreviewMargin), maxX), y: min(max(y, dragPreviewMargin), maxY))
+    }
+
+    @ViewBuilder
+    private func dragPreviewOverlay(boardSize: CGSize) -> some View {
+        if let drag {
+            let offset = Self.dragPreviewOffset(for: drag.location, boardSize: boardSize)
+            dragPreview(drag)
+                .offset(x: offset.x, y: offset.y)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func dragPreview(_ session: TaskDragSession) -> some View {
+        let target = dropTarget(at: session.location)
+        let isSource = target.map { isSourceTarget($0, session: session) } ?? false
+        let blocked = target.map { isBlocked($0, item: session.item) } ?? false
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(session.item.title)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+            if isSource {
+                Text("放回原处，不改动")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            } else if blocked {
+                Text(blockReason(for: session.item))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+            } else if let target {
+                Text(dropTitle(target))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 220, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(blocked && !isSource ? Color.red.opacity(0.6) : .primary.opacity(0.15), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+    }
+
+    private func dragNoticeView(_ notice: String) -> some View {
+        Text(notice)
+            .font(.system(size: 11, weight: .medium))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().stroke(.primary.opacity(0.12), lineWidth: 0.5))
+            .padding(.bottom, Self.footerHeight + 6)
+            .allowsHitTesting(false)
+            .task(id: notice) {
+                try? await Task.sleep(nanoseconds: 2_200_000_000)
+                if !Task.isCancelled, dragNotice == notice {
+                    dragNotice = nil
+                }
+            }
+    }
+
+    private func listDropZone(_ status: TodoStatus, title: String) -> some View {
+        let hovered = drag.flatMap { dropTarget(at: $0.location) } == .status(status)
+        let isSource = drag.map { isSourceTarget(.status(status), session: $0) } ?? false
+        let active = hovered && !isSource
+        return Text(title)
+            .font(.system(size: 11.5, weight: .semibold))
+            .foregroundStyle(active ? Color.accentColor : .secondary)
+            .frame(maxWidth: .infinity)
+            .frame(height: 32)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(active ? Color.accentColor : (hovered ? Color.primary.opacity(0.2) : Color.primary.opacity(0.15)), lineWidth: active ? 2 : 1)
+            )
+            .background(dropFrameReporter(.status(status)))
+            .accessibilityLabel("\(title) 落点")
+    }
+
     private func reportPreferredHeight(_ bodyHeight: CGFloat) {
         let toolbar = isInteractive ? Self.toolbarHeight : 0
         onPreferredHeightChange(Self.headerHeight + toolbar + bodyHeight + Self.footerHeight)
@@ -486,14 +715,57 @@ private struct HUDContentHeightKey: PreferenceKey {
     }
 }
 
+private enum HudDropTarget: Hashable {
+    case quadrant(HudQuadrant)
+    case status(TodoStatus)
+}
+
+private struct HudDropFrameKey: PreferenceKey {
+    static let defaultValue: [HudDropTarget: CGRect] = [:]
+
+    static func reduce(value: inout [HudDropTarget: CGRect], nextValue: () -> [HudDropTarget: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+/// 手柄命中区：禁止窗口背景拖动抢占，事件仍交给 SwiftUI 手势。
+private struct DragHandleSurface: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        HandleHitView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class HandleHitView: NSView {
+        override var mouseDownCanMoveWindow: Bool { false }
+    }
+}
+
+extension HudQuadrant {
+    var displayTitle: String {
+        switch self {
+        case .importantUrgent: return "优先处理"
+        case .importantNotUrgent: return "安排时间"
+        case .generalUrgent: return "及时处理"
+        case .generalNotUrgent: return "稍后处理"
+        }
+    }
+}
+
 private struct DesktopNoteRowView: View {
     let item: TodoItem
     let quadrant: HudQuadrant
     let isOverdue: Bool
     let isInteractive: Bool
+    var isDragSource: Bool = false
+    var onDragEvent: ((HudDragGestureEvent) -> Void)? = nil
     let onAdvanceStatus: () -> Void
 
     @State private var isHovering = false
+    /// 本行物理手势已上报开始；松手、复位或手柄移除时清零。
+    @State private var hasBegun = false
+    /// 手势结束或被系统取消时自动复位，作为不依赖 onEnded 的清理信号。
+    @GestureState private var isGestureActive = false
     @FocusState private var isStatusFocused: Bool
 
     var body: some View {
@@ -570,12 +842,49 @@ private struct DesktopNoteRowView: View {
                 }
             }
             .frame(width: 84, alignment: .trailing)
+
+            if isInteractive, let onDragEvent {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary.opacity(isHovering ? 0.9 : 0.45))
+                    .frame(width: 16, height: 27)
+                    .background(DragHandleSurface())
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 3, coordinateSpace: .named(DesktopNotesBoardView.hudCoordinateSpace))
+                            .updating($isGestureActive) { _, state, _ in state = true }
+                            .onChanged { value in
+                                if !hasBegun {
+                                    hasBegun = true
+                                    onDragEvent(.began)
+                                }
+                                onDragEvent(.moved(value.location))
+                            }
+                            .onEnded { value in
+                                hasBegun = false
+                                onDragEvent(.ended(value.location))
+                            }
+                    )
+                    .onChange(of: isGestureActive) { _, active in
+                        if !active {
+                            hasBegun = false
+                            onDragEvent(.gestureReset)
+                        }
+                    }
+                    .onDisappear {
+                        hasBegun = false
+                        onDragEvent(.sourceDisappeared)
+                    }
+                    .help("拖动调整")
+                    .accessibilityLabel("拖动：\(item.title)")
+            }
         }
         .padding(.horizontal, 12)
         .padding(.top, 6)
         .padding(.bottom, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.primary.opacity(isHovering && isInteractive ? 0.06 : 0))
+        .opacity(isDragSource ? 0.35 : 1)
         .onHover { isHovering = $0 }
     }
 

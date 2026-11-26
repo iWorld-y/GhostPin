@@ -15,6 +15,11 @@ struct GhostPinApp: App {
             FileHandle.standardError.write(Data("GHOSTPIN_WINDOW_SELFTEST 需要 GHOSTPIN_TEST_SUPPORT_ROOT 隔离根\n".utf8))
             exit(2)
         }
+        if ProcessInfo.processInfo.environment["GHOSTPIN_DRAG_SELFTEST"] != nil,
+           !AppPreferences.isIsolatedVerification {
+            FileHandle.standardError.write(Data("GHOSTPIN_DRAG_SELFTEST 需要 GHOSTPIN_TEST_SUPPORT_ROOT 隔离根\n".utf8))
+            exit(2)
+        }
         #endif
         let state = AppState()
         _appState = StateObject(wrappedValue: state)
@@ -65,6 +70,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         if ProcessInfo.processInfo.environment["GHOSTPIN_WINDOW_SELFTEST"] != nil {
             let ok = Self.appState?.windowCoordinator.runGeometrySelfTest() ?? false
+            exit(ok ? 0 : 1)
+        }
+        if ProcessInfo.processInfo.environment["GHOSTPIN_DRAG_SELFTEST"] != nil {
+            let ok = Self.appState?.runDragSelfTest() ?? false
             exit(ok ? 0 : 1)
         }
         #endif

@@ -7,6 +7,14 @@ public enum HudQuadrant: String, CaseIterable, Sendable {
     case generalUrgent
     case generalNotUrgent
 
+    public var isImportantRow: Bool {
+        self == .importantUrgent || self == .importantNotUrgent
+    }
+
+    public var isUrgentColumn: Bool {
+        self == .importantUrgent || self == .generalUrgent
+    }
+
     public var sortRank: Int {
         switch self {
         case .importantUrgent: return 1

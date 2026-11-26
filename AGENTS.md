@@ -47,7 +47,7 @@ make dmg                            # 构建并校验 DMG
 - 处理真实 GhostPin 待办前，先读取 `skills/ghostpin-cli/SKILL.md`，并使用固定入口 `/Applications/GhostPin.app/Contents/MacOS/ghostpin-cli`；不要直接编辑 `todos.json`，也不要用 `.build`、PATH 或 `swift run` 代替已安装 CLI。
 - 修改已有任务前先用 `list --all --json` 获取真实整数 ID，可加 `--group` 限定组别；同名无法消歧时先询问；写后检查 ID、组别、JSON 和退出码，删除后再次查询确认。
 - 新增必须显式传入 `--group`，上下文未明确组别时先询问。内置组为 `默认`，不允许未分组；组别标记位于优先级右侧，两者在卡片标题行整体右对齐，组名最多显示三个汉字的文本宽度。
-- HUD 当前唯一允许的任务写交互是状态推进：`Todo → Doing → Done`（`AppState.advanceStatus`）。新增、字段编辑、重开和删除仍只能通过 CLI；不要给 App 增加这些录入 UI。
+- HUD 允许的任务写交互只有两种：圆形按钮状态推进 `Todo → Doing → Done`（`AppState.advanceStatus`），以及交互模式下的单任务拖动（四象限经 `TodoStore.dragToQuadrant` 调整 `important`/`urgent`，单列经 `TodoStore.dragToStatus` 在 Todo 与 Doing 间切换）。拖动在 `.todos.lock` 内按最新任务校验，今天到期或已逾期任务禁放右侧不紧急象限，同列保留手动 `urgent`。新增、字段编辑、重开和删除仍只能通过 CLI；不要给 App 增加这些录入 UI。
 - 全局快捷键只用于切换 HUD 穿透/交互模式，默认关闭且由用户在「高级」设置中配置；不要增加其他全局快捷键。
 - App 通过 `TodoFileWatcher` 监听 CLI 写入并重新加载；业务逻辑下沉到 `GhostPinCore`，`AppState` 只做服务和 UI 编排。
 - 任务数据位于 `~/Library/Application Support/GhostPin/todos.json`，偏好位于 UserDefaults。任务文档为 `{schemaVersion: 2, nextID, items}`，整数 ID 从 `10000` 开始且删除后不复用。全部任务写入必须在固定 `.todos.lock` 内重读、修改并原子提交，禁止写回旧快照或重算计数器。

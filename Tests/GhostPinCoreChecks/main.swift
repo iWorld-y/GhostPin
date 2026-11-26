@@ -98,6 +98,13 @@ let checks: [Check] = [
     ("TodoStore.hudQuadrantProjection reclassifies across midnight", checkHudQuadrantDayRollover),
     ("TodoStore.hudQuadrantProjection follows axis and due updates", checkHudQuadrantUpdateMovesCell),
     ("TodoStore.hudQuadrantProjection keeps four empty cells when empty", checkHudQuadrantEmptyProjection),
+    ("TodoStore.dragToQuadrant maps four cells and preserves fields", checkHudDragQuadrantMapping),
+    ("TodoStore.dragToQuadrant keeps manual urgency within column", checkHudDragQuadrantSameColumnKeepsUrgent),
+    ("TodoStore.dragToQuadrant blocks today and overdue into right column", checkHudDragQuadrantDueRestriction),
+    ("TodoStore.dragToQuadrant revalidates at drop across midnight", checkHudDragQuadrantDayRollover),
+    ("TodoStore.dragToStatus switches Todo and Doing both ways", checkHudDragStatusSwitch),
+    ("TodoStore drag rejects stale deleted completed and out-of-scope", checkHudDragRejectsStaleAndDeleted),
+    ("TodoStore drag save failure keeps file and snapshot", checkHudDragSaveFailure),
     ("HudFrameGeometry.restoredFrame clamps partial overflow", checkHudFrameRestoredClampsPartialOverflow),
     ("HudFrameGeometry.restoredFrame falls back to main when offscreen", checkHudFrameRestoredFallsBackToMain),
     ("HudFrameGeometry.restoredFrame picks the best-intersecting screen", checkHudFrameRestoredPicksBestScreen),
@@ -2137,4 +2144,302 @@ func checkHudCollapseRealFrameReproduction() throws {
     try check(HudFrameGeometry.collapseSide(frame: leftQuadrants, visible: visible) == .left, "近左应选左")
     let leftCollapsed = HudFrameGeometry.collapsedListFrame(current: leftQuadrants, targetSize: listSize, screens: [a], main: a)
     try check(leftCollapsed.minX == 0 && leftCollapsed.maxY == quadrants.maxY, "左侧应收向左缘并保留垂直，实际: \(leftCollapsed)")
+}
+
+func movedDragItem(_ result: HudDragResult) throws -> TodoItem {
+    guard case let .moved(item) = result else {
+        throw CheckFailure(message: "拖动应成功，实际: \(result)")
+    }
+    return item
+}
+
+func checkHudDragQuadrantMapping() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = makeStore(in: directory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+    let reminderAt = makeDate(year: 2026, month: 6, day: 15, hour: 17, minute: 0)
+
+    let item = try require(
+        try store.add(title: "稍后任务", group: "项目", important: false, urgent: false, createdAt: now, reminderAt: reminderAt, description: "保留描述"),
+        "应创建"
+    )
+    let moved = try movedDragItem(try store.dragToQuadrant(item.id, from: .generalNotUrgent, to: .importantUrgent, scope: .all, now: now, calendar: checkCalendar))
+    try check(moved.important && moved.urgent, "拖入优先处理应写入两个布尔字段")
+    try check(moved.status == .todo && moved.completedAt == nil, "拖动不得改变状态")
+    try check(moved.group == "项目" && moved.reminderAt == reminderAt && moved.description == "保留描述" && moved.dueAt == nil, "其余字段应保留")
+
+    let doing = try require(try store.add(title: "Doing 任务", group: "默认", important: true, urgent: true, createdAt: now), "应创建")
+    _ = try store.setStatus(doing.id, status: .doing, at: now)
+    let movedDoing = try movedDragItem(try store.dragToQuadrant(doing.id, from: .importantUrgent, to: .generalNotUrgent, scope: .all, now: now, calendar: checkCalendar))
+    try check(!movedDoing.important && !movedDoing.urgent && movedDoing.status == .doing, "跨格换列应保留 Doing 状态")
+
+    let schedule = try require(try store.add(title: "安排任务", group: "默认", important: true, urgent: false, createdAt: now), "应创建")
+    let movedSchedule = try movedDragItem(try store.dragToQuadrant(schedule.id, from: .importantNotUrgent, to: .generalUrgent, scope: .all, now: now, calendar: checkCalendar))
+    try check(!movedSchedule.important && movedSchedule.urgent, "拖入及时处理应只改两个布尔字段")
+
+    let urgent = try require(try store.add(title: "紧急任务", group: "默认", important: false, urgent: true, createdAt: now), "应创建")
+    let movedUrgent = try movedDragItem(try store.dragToQuadrant(urgent.id, from: .generalUrgent, to: .importantNotUrgent, scope: .all, now: now, calendar: checkCalendar))
+    try check(movedUrgent.important && !movedUrgent.urgent, "拖入安排时间应按目标行列写入")
+
+    let projection = store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar)
+    try check(projection.cell(.importantUrgent).todo.map(\.id) == [item.id], "目标格应接收任务")
+    try check(projection.cell(.generalNotUrgent).doing.map(\.id) == [doing.id], "Doing 应进入目标格 Doing 分区")
+    try check(projection.cell(.generalUrgent).todo.map(\.id) == [movedSchedule.id], "及时处理应接收安排任务")
+    try check(projection.cell(.importantNotUrgent).todo.map(\.id) == [urgent.id], "安排时间应接收紧急任务")
+    try check(projection.doingCount == 1 && projection.todoCount == 3, "头部计数应随投放更新")
+
+    let reloaded = makeStore(in: directory)
+    try reloaded.load()
+    let persisted = try require(reloaded.items.first { $0.id == item.id }, "应保留任务")
+    try check(persisted.important && persisted.urgent && persisted.description == "保留描述", "拖动结果应持久化")
+}
+
+func checkHudDragQuadrantSameColumnKeepsUrgent() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = makeStore(in: directory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let manual = try require(try store.add(title: "手动紧急", group: "默认", important: true, urgent: true, createdAt: now), "应创建")
+    let movedManual = try movedDragItem(try store.dragToQuadrant(manual.id, from: .importantUrgent, to: .generalUrgent, scope: .all, now: now, calendar: checkCalendar))
+    try check(!movedManual.important && movedManual.urgent, "左列换行应保留手动紧急标记")
+
+    let dueDriven = try require(
+        try store.add(title: "今天到期", group: "默认", important: false, urgent: false, createdAt: now, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0)),
+        "应创建"
+    )
+    let movedDue = try movedDragItem(try store.dragToQuadrant(dueDriven.id, from: .generalUrgent, to: .importantUrgent, scope: .all, now: now, calendar: checkCalendar))
+    try check(movedDue.important && !movedDue.urgent, "因截止紧急的任务换行不得写入手动紧急")
+    try check(store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar).cell(.importantUrgent).todo.contains { $0.id == dueDriven.id }, "仍应因截止时间留在左列")
+
+    _ = try store.update(dueDriven.id, clearDue: true)
+    let reclassified = store.hudQuadrantProjection(scope: .all, now: now, calendar: checkCalendar)
+    try check(reclassified.cell(.importantNotUrgent).todo.contains { $0.id == dueDriven.id }, "改期后应按有效紧迫度重新分类")
+    try check(reclassified.cell(.importantNotUrgent).todo.first { $0.id == dueDriven.id }?.urgent == false, "改期后不得残留手动紧急")
+
+    let right = try require(
+        try store.add(title: "右列任务", group: "默认", important: true, urgent: false, createdAt: now, dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 9, minute: 0)),
+        "应创建"
+    )
+    let movedRight = try movedDragItem(try store.dragToQuadrant(right.id, from: .importantNotUrgent, to: .generalNotUrgent, scope: .all, now: now, calendar: checkCalendar))
+    try check(!movedRight.important && !movedRight.urgent && movedRight.dueAt == right.dueAt, "右列换行保留不紧急与截止时间")
+}
+
+func checkHudDragQuadrantDueRestriction() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = makeStore(in: directory)
+    let file = directory.appendingPathComponent("todos.json")
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let todayDue = try require(
+        try store.add(title: "今天到期", group: "默认", important: false, urgent: false, createdAt: now, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0)),
+        "应创建"
+    )
+    let before = try Data(contentsOf: file)
+    let sameRow = try store.dragToQuadrant(todayDue.id, from: .generalUrgent, to: .generalNotUrgent, scope: .all, now: now, calendar: checkCalendar)
+    try check(sameRow == .dueDateRestricted(todayDue), "今天到期禁放右列并带回最新任务")
+    let otherRow = try store.dragToQuadrant(todayDue.id, from: .generalUrgent, to: .importantNotUrgent, scope: .all, now: now, calendar: checkCalendar)
+    try check(otherRow == .dueDateRestricted(todayDue), "换行也不能绕过禁放")
+    try check(try Data(contentsOf: file) == before, "禁放不得写入文件")
+
+    let overdue = try require(
+        try store.add(title: "已逾期", group: "默认", important: true, urgent: true, createdAt: now, dueAt: makeDate(year: 2026, month: 6, day: 14, hour: 10, minute: 0)),
+        "应创建"
+    )
+    let overdueBefore = try Data(contentsOf: file)
+    for target in [HudQuadrant.importantNotUrgent, .generalNotUrgent] {
+        let result = try store.dragToQuadrant(overdue.id, from: .importantUrgent, to: target, scope: .all, now: now, calendar: checkCalendar)
+        try check(result == .dueDateRestricted(overdue), "已逾期禁放 \(target)")
+    }
+    try check(try Data(contentsOf: file) == overdueBefore, "已逾期禁放不得改写重要度")
+
+    let todayEnd = try require(
+        try store.add(title: "今天末尾", group: "默认", important: true, urgent: false, createdAt: now, dueAt: makeDate(year: 2026, month: 6, day: 15, hour: 23, minute: 59)),
+        "应创建"
+    )
+    let endResult = try store.dragToQuadrant(todayEnd.id, from: .importantUrgent, to: .importantNotUrgent, scope: .all, now: now, calendar: checkCalendar)
+    try check(endResult == .dueDateRestricted(todayEnd), "今天 23:59 到期仍禁放右列")
+
+    let nextMidnight = try require(
+        try store.add(title: "次日零点", group: "默认", important: true, urgent: true, createdAt: now, dueAt: makeDate(year: 2026, month: 6, day: 16, hour: 0, minute: 0)),
+        "应创建"
+    )
+    let midnightMoved = try movedDragItem(try store.dragToQuadrant(nextMidnight.id, from: .importantUrgent, to: .importantNotUrgent, scope: .all, now: now, calendar: checkCalendar))
+    try check(midnightMoved.important && !midnightMoved.urgent && midnightMoved.dueAt == nextMidnight.dueAt, "次日零点到期允许放入右列并保留截止")
+
+    let leftMoved = try movedDragItem(try store.dragToQuadrant(overdue.id, from: .importantUrgent, to: .generalUrgent, scope: .all, now: now, calendar: checkCalendar))
+    try check(!leftMoved.important && leftMoved.urgent, "左列目标不受截止限制")
+}
+
+func checkHudDragQuadrantDayRollover() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = makeStore(in: directory)
+    let file = directory.appendingPathComponent("todos.json")
+    let beforeMidnight = makeDate(year: 2026, month: 6, day: 15, hour: 23, minute: 59)
+    let afterMidnight = makeDate(year: 2026, month: 6, day: 16, hour: 0, minute: 0)
+
+    let item = try require(
+        try store.add(title: "跨日任务", group: "默认", important: true, urgent: false, createdAt: beforeMidnight, dueAt: afterMidnight),
+        "应创建"
+    )
+    let before = try Data(contentsOf: file)
+    let restricted = try store.dragToQuadrant(item.id, from: .importantNotUrgent, to: .generalNotUrgent, scope: .all, now: afterMidnight, calendar: checkCalendar)
+    try check(restricted == .dueDateRestricted(item), "投放时进入到期日应按最新日期禁放右列")
+    let stale = try store.dragToQuadrant(item.id, from: .importantNotUrgent, to: .importantUrgent, scope: .all, now: afterMidnight, calendar: checkCalendar)
+    try check(stale == .taskChanged, "跨日后起始象限过时应拒绝")
+    try check(try Data(contentsOf: file) == before, "跨日拒绝不得写入")
+
+    let moved = try movedDragItem(try store.dragToQuadrant(item.id, from: .importantNotUrgent, to: .generalNotUrgent, scope: .all, now: beforeMidnight, calendar: checkCalendar))
+    try check(!moved.important && !moved.urgent, "到期日前投放仍允许")
+    let after = store.hudQuadrantProjection(scope: .all, now: afterMidnight, calendar: checkCalendar)
+    try check(after.cell(.generalUrgent).todo.map(\.id) == [item.id], "跨日后应按最新日期展示有效紧迫程度")
+}
+
+func checkHudDragStatusSwitch() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = makeStore(in: directory)
+    let file = directory.appendingPathComponent("todos.json")
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+    let dueAt = makeDate(year: 2026, month: 6, day: 14, hour: 10, minute: 0)
+    let reminderAt = makeDate(year: 2026, month: 6, day: 15, hour: 17, minute: 0)
+
+    let item = try require(
+        try store.add(title: "逾期任务", group: "项目", important: true, urgent: false, createdAt: now, reminderAt: reminderAt, dueAt: dueAt, description: "保留描述"),
+        "应创建"
+    )
+    _ = try store.setStatus(item.id, status: .doing, at: now)
+    let toTodo = try movedDragItem(try store.dragToStatus(item.id, from: .doing, to: .todo, scope: .all, now: now, calendar: checkCalendar))
+    try check(toTodo.status == .todo && toTodo.completedAt == nil && !toTodo.isCompleted, "逾期 Doing 可拖回 Todo 且保持未完成")
+    try check(toTodo.dueAt == dueAt && toTodo.isOverdue(now: now), "截止时间和逾期标记应保留")
+    try check(toTodo.important && !toTodo.urgent && toTodo.group == "项目" && toTodo.reminderAt == reminderAt && toTodo.description == "保留描述", "其余字段应保留")
+
+    let toDoing = try movedDragItem(try store.dragToStatus(item.id, from: .todo, to: .doing, scope: .all, now: now, calendar: checkCalendar))
+    try check(toDoing.status == .doing && toDoing.completedAt == nil, "Todo 可拖入 Doing")
+    let reloaded = makeStore(in: directory)
+    try reloaded.load()
+    try check(reloaded.items.first { $0.id == item.id }?.status == .doing, "状态切换应持久化")
+
+    let before = try Data(contentsOf: file)
+    try check(try store.dragToStatus(item.id, from: .doing, to: .done, scope: .all, now: now, calendar: checkCalendar) == .unchanged, "拖动不得标记完成")
+    try check(try store.dragToStatus(item.id, from: .done, to: .todo, scope: .all, now: now, calendar: checkCalendar) == .unchanged, "已完成任务不得经拖动重开")
+    try check(try store.dragToStatus(item.id, from: .doing, to: .doing, scope: .all, now: now, calendar: checkCalendar) == .unchanged, "同状态投放不写入")
+    try check(try Data(contentsOf: file) == before, "无效投放不得写入文件")
+
+    let second = try require(try store.add(title: "另一条", group: "默认", important: false, urgent: false, createdAt: now), "应创建")
+    let focused = store.hudProjection(scope: .all, maxCount: 1, focusDoing: true, now: now, calendar: checkCalendar)
+    try check(focused.doing.map(\.id) == [item.id] && focused.todo.isEmpty && focused.todoCount == 1, "聚焦且上限 1 时 Todo 被隐藏")
+    _ = try movedDragItem(try store.dragToStatus(item.id, from: .doing, to: .todo, scope: .all, now: now, calendar: checkCalendar))
+    let afterFocus = store.hudProjection(scope: .all, maxCount: 1, focusDoing: true, now: now, calendar: checkCalendar)
+    try check(afterFocus.doing.isEmpty && afterFocus.todo.map(\.id) == [item.id], "聚焦下拖回 Todo 后按既有规则展示")
+
+    _ = try store.setStatus(item.id, status: .doing, at: now)
+    _ = try store.setStatus(second.id, status: .doing, at: now)
+    let limited = store.hudProjection(scope: .all, maxCount: 1, focusDoing: false, now: now, calendar: checkCalendar)
+    try check(limited.doing.count == 1 && limited.todo.isEmpty, "Doing 占满上限时 Todo 不渲染")
+    _ = try movedDragItem(try store.dragToStatus(item.id, from: .doing, to: .todo, scope: .all, now: now, calendar: checkCalendar))
+    try check(store.items.first { $0.id == item.id }?.status == .todo, "上限隐藏不阻止状态切换")
+}
+
+func checkHudDragRejectsStaleAndDeleted() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("todos.json")
+    let stale = makeStore(in: directory)
+    let external = makeStore(in: directory)
+    let now = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+
+    let item = try require(try stale.add(title: "原任务", group: "默认", important: false, urgent: false, createdAt: now), "应创建")
+    var before = try Data(contentsOf: file)
+    try check(try stale.dragToQuadrant(item.id, from: .generalNotUrgent, to: .generalNotUrgent, scope: .all, now: now, calendar: checkCalendar) == .unchanged, "同格投放应直接结束")
+    try check(try Data(contentsOf: file) == before, "同格投放不得写入")
+
+    _ = try external.update(item.id, urgent: true)
+    before = try Data(contentsOf: file)
+    try check(try stale.dragToQuadrant(item.id, from: .generalNotUrgent, to: .importantUrgent, scope: .all, now: now, calendar: checkCalendar) == .taskChanged, "起始象限过时应拒绝")
+    try check(try stale.dragToQuadrant(item.id, from: .generalNotUrgent, to: .generalUrgent, scope: .all, now: now, calendar: checkCalendar) == .taskChanged, "最新数据已是目标格也应拒绝")
+    try check(try Data(contentsOf: file) == before, "拒绝不得写入")
+    try check(stale.items.first { $0.id == item.id }?.urgent == true, "拒绝后应发布最新快照")
+
+    let todayDue = makeDate(year: 2026, month: 6, day: 15, hour: 18, minute: 0)
+    _ = try external.update(item.id, urgent: false, dueAt: todayDue)
+    before = try Data(contentsOf: file)
+    let restricted = try stale.dragToQuadrant(item.id, from: .generalUrgent, to: .generalNotUrgent, scope: .all, now: now, calendar: checkCalendar)
+    guard case let .dueDateRestricted(latest) = restricted else {
+        throw CheckFailure(message: "并发改期应按最新截止禁放，实际: \(restricted)")
+    }
+    try check(latest.dueAt == todayDue, "禁放应带回最新截止时间")
+    try check(try Data(contentsOf: file) == before, "并发改期拒绝不得写入")
+    _ = try external.update(item.id, clearDue: true)
+
+    _ = try external.setStatus(item.id, status: .doing)
+    before = try Data(contentsOf: file)
+    try check(try stale.dragToStatus(item.id, from: .todo, to: .doing, scope: .all, now: now, calendar: checkCalendar) == .taskChanged, "最新状态已是目标应拒绝")
+    _ = try external.setStatus(item.id, status: .done)
+    before = try Data(contentsOf: file)
+    try check(try stale.dragToStatus(item.id, from: .doing, to: .todo, scope: .all, now: now, calendar: checkCalendar) == .taskChanged, "已完成任务应拒绝")
+    try check(try stale.dragToQuadrant(item.id, from: .generalUrgent, to: .importantUrgent, scope: .all, now: now, calendar: checkCalendar) == .taskChanged, "已完成任务四象限也应拒绝")
+    try check(try Data(contentsOf: file) == before, "完成拒绝不得写入")
+
+    try external.delete(item.id)
+    before = try Data(contentsOf: file)
+    try check(try stale.dragToQuadrant(item.id, from: .generalUrgent, to: .importantUrgent, scope: .all, now: now, calendar: checkCalendar) == .taskChanged, "删除后四象限应拒绝")
+    try check(try stale.dragToStatus(item.id, from: .doing, to: .todo, scope: .all, now: now, calendar: checkCalendar) == .taskChanged, "删除后单列应拒绝")
+    try check(try Data(contentsOf: file) == before, "删除拒绝不得写入")
+
+    let old = try require(try stale.add(title: "昨天任务", group: "默认", important: false, urgent: false, createdAt: makeDate(year: 2026, month: 6, day: 14, hour: 23, minute: 59)), "应创建")
+    before = try Data(contentsOf: file)
+    try check(try stale.dragToQuadrant(old.id, from: .generalNotUrgent, to: .importantUrgent, scope: .today, now: now, calendar: checkCalendar) == .taskChanged, "范围外四象限应拒绝")
+    try check(try stale.dragToStatus(old.id, from: .todo, to: .doing, scope: .today, now: now, calendar: checkCalendar) == .taskChanged, "范围外单列应拒绝")
+    try check(try Data(contentsOf: file) == before, "范围拒绝不得写入")
+
+    let fresh = try require(try stale.add(title: "新任务", group: "默认", important: false, urgent: false, createdAt: now), "应创建")
+    let reminderAt = makeDate(year: 2026, month: 6, day: 15, hour: 17, minute: 0)
+    _ = try external.update(fresh.id, title: "外部标题", reminderAt: reminderAt, group: "完整组")
+    let moved = try movedDragItem(try stale.dragToQuadrant(fresh.id, from: .generalNotUrgent, to: .importantUrgent, scope: .all, now: now, calendar: checkCalendar))
+    try check(moved.title == "外部标题" && moved.group == "完整组" && moved.reminderAt == reminderAt, "成功投放应保留另一实例修改的无关字段")
+    _ = try external.update(fresh.id, description: "外部描述")
+    let switched = try movedDragItem(try stale.dragToStatus(fresh.id, from: .todo, to: .doing, scope: .all, now: now, calendar: checkCalendar))
+    try check(switched.description == "外部描述" && switched.important && switched.urgent && switched.status == .doing, "状态切换应保留外部描述与优先级")
+}
+
+func checkHudDragSaveFailure() throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("todos.json")
+    let seed = makeStore(in: directory)
+    let item = try require(try seed.add(title: "失败任务", group: "默认", important: false, urgent: false), "应创建")
+    let before = try Data(contentsOf: file)
+
+    let failing = TodoStore(fileURL: file, fileManager: CommitFailingFileManager(), initialItems: seed.items)
+    var published = 0
+    let subscription = failing.objectWillChange.sink { published += 1 }
+    do {
+        _ = try failing.dragToQuadrant(item.id, from: .generalNotUrgent, to: .importantUrgent, scope: .all)
+        throw CheckFailure(message: "模拟提交应失败")
+    } catch is CheckFailure {
+        throw CheckFailure(message: "模拟提交未失败")
+    } catch {
+        try check(try Data(contentsOf: file) == before, "保存失败应保留文件")
+        try check(failing.items == seed.items && published == 0, "保存失败不得发布快照")
+    }
+    withExtendedLifetime(subscription) {}
+
+    let failingStatus = TodoStore(fileURL: file, fileManager: CommitFailingFileManager(), initialItems: seed.items)
+    do {
+        _ = try failingStatus.dragToStatus(item.id, from: .todo, to: .doing, scope: .all)
+        throw CheckFailure(message: "模拟状态提交应失败")
+    } catch is CheckFailure {
+        throw CheckFailure(message: "模拟状态提交未失败")
+    } catch {
+        try check(try Data(contentsOf: file) == before, "状态保存失败应保留文件")
+        try check(failingStatus.items == seed.items, "状态保存失败应保留快照")
+    }
+
+    let retry = makeStore(in: directory)
+    _ = try movedDragItem(try retry.dragToQuadrant(item.id, from: .generalNotUrgent, to: .importantUrgent, scope: .all))
+    try check(retry.items.first?.important == true, "失败后重试应成功")
 }
